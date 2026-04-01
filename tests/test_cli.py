@@ -3,9 +3,11 @@ from __future__ import annotations
 import shutil
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
+import recall.cli.artifacts as artifacts_cli
 from recall.cli.main import app
 from recall.normalize.artifacts import NormalizedArtifact, RemoteLocator
 from recall.normalize.events import NormalizedEvent, RawReference
@@ -230,6 +232,102 @@ def test_artifacts_show_reports_download_failure_detail(tmp_path) -> None:
     assert result.exit_code == 0
     assert "download_status=failed" in result.stdout
     assert "last_error=404 Not Found" in result.stdout
+
+
+def test_artifacts_download_reports_missing_normalize_step(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SLACK_USER_TOKEN", "xoxp-test")
+
+    result = runner.invoke(
+        app,
+        ["artifacts", "download", "slack", "--root", str(tmp_path), "--date", "2026-03-31"],
+    )
+
+    assert result.exit_code != 0
+    assert "No slack artifact metadata found for 2026-03-31" in result.output
+
+
+def test_artifacts_download_reports_metadata_only_guidance(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SLACK_USER_TOKEN", "xoxp-test")
+    paths = RecallPaths.from_root(tmp_path)
+    write_artifact_metadata(
+        paths,
+        source="slack",
+        date="2026-03-31",
+        artifacts=[NormalizedArtifact(artifact_id="artifact_1", source="slack", kind="file")],
+    )
+
+    result = runner.invoke(
+        app,
+        ["artifacts", "download", "slack", "--root", str(tmp_path), "--date", "2026-03-31"],
+    )
+
+    assert result.exit_code == 0
+    assert "download_mode=metadata-only" in result.stdout
+    assert "--policy download-source-native" in result.stdout
+
+
+def test_artifacts_download_reports_files_read_hint(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SLACK_USER_TOKEN", "xoxp-test")
+    paths = RecallPaths.from_root(tmp_path)
+    write_artifact_metadata(
+        paths,
+        source="slack",
+        date="2026-03-31",
+        artifacts=[
+            NormalizedArtifact(
+                artifact_id="artifact_1",
+                source="slack",
+                kind="file",
+                download_status="failed",
+                last_error="Redirect response '302 Found' for url 'https://files.slack.com/foo'",
+            )
+        ],
+    )
+
+    def fake_download(*args, **kwargs):
+        del args, kwargs
+        return SimpleNamespace(
+            artifact_path=paths.artifact_metadata_path("slack", "2026-03-31"),
+            artifacts_seen=1,
+            would_download=1,
+            downloaded=0,
+            skipped_policy=0,
+            skipped_existing=0,
+            failed=1,
+        )
+
+    monkeypatch.setattr(artifacts_cli, "download_slack_artifacts", fake_download)
+
+    result = runner.invoke(
+        app,
+        [
+            "artifacts",
+            "download",
+            "slack",
+            "--root",
+            str(tmp_path),
+            "--date",
+            "2026-03-31",
+            "--policy",
+            "download-source-native",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "files:read" in result.stdout
+
+
+def test_normalize_slack_reports_next_steps(tmp_path) -> None:
+    paths = _copy_slack_fixture_capture(tmp_path)
+    assert paths.raw_capture_dir("slack", "2026-03-31").exists()
+
+    result = runner.invoke(
+        app,
+        ["normalize", "slack", "--root", str(tmp_path), "--date", "2026-03-31"],
+    )
+
+    assert result.exit_code == 0
+    assert "recall artifacts show --date 2026-03-31" in result.stdout
 
 
 def test_entities_sync_slack_persists_identity_rows(tmp_path) -> None:

@@ -141,6 +141,7 @@ def capture_slack(
     typer.echo(f"conversations={conversations_path}")
     typer.echo(f"messages={messages_path}")
     typer.echo(f"stored_messages={day_result.stats['stored_messages']}")
+    typer.echo(f"next_step=run 'recall normalize slack --date {date}'")
 
 
 def normalize_slack(
@@ -163,6 +164,10 @@ def normalize_slack(
     typer.echo(f"Normalized Slack events for {date}")
     typer.echo(f"events={normalized_path}")
     typer.echo(f"artifacts={artifact_path}")
+    typer.echo(
+        f"next_step=run 'recall artifacts show --date {date}' or "
+        f"'recall artifacts download slack --date {date}'"
+    )
 
 
 def sync_slack_entities(

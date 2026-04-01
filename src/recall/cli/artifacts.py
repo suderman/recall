@@ -19,6 +19,28 @@ def _paths_for(root: Path | None) -> RecallPaths:
     return RecallPaths.from_root(resolve_root(root))
 
 
+def _missing_artifact_metadata_message(paths: RecallPaths, *, source: str, date: str) -> str:
+    artifact_path = paths.artifact_metadata_path(source, date)
+    return (
+        f"No {source} artifact metadata found for {date} at {artifact_path}. "
+        f"Run 'recall normalize {source} --date {date}' first."
+    )
+
+
+def _looks_like_slack_scope_error(last_error: str | None) -> bool:
+    if not last_error:
+        return False
+
+    indicators = (
+        "302 Found",
+        "slack.com/?redir=",
+        "403 Forbidden",
+        "401 Unauthorized",
+        "login",
+    )
+    return any(indicator in last_error for indicator in indicators)
+
+
 def _render_artifact(artifact: dict[str, Any]) -> list[str]:
     label = artifact.get("filename") or artifact.get("source_object_id") or "-"
     artifact_id = artifact.get("artifact_id") or "-"
@@ -64,7 +86,9 @@ def show_artifacts(
     paths = _paths_for(root)
     artifact_path = paths.artifact_metadata_path(source, date)
     if not artifact_path.exists():
-        raise typer.BadParameter(f"No artifact metadata file found at {artifact_path}")
+        raise typer.BadParameter(
+            _missing_artifact_metadata_message(paths, source=source, date=date)
+        )
 
     artifacts = read_jsonl(artifact_path)
     if limit is not None:
@@ -126,6 +150,23 @@ def download_slack_artifact_bytes(
         )
 
     resolved_policy = policy or config.artifact_download_policy
+    artifact_path = paths.artifact_metadata_path("slack", date)
+    if not artifact_path.exists():
+        raise typer.BadParameter(
+            _missing_artifact_metadata_message(paths, source="slack", date=date)
+        )
+
+    if resolved_policy != "download-source-native":
+        typer.echo("source=slack")
+        typer.echo(f"date={date}")
+        typer.echo(f"policy={resolved_policy}")
+        typer.echo("download_mode=metadata-only")
+        typer.echo(
+            "next_step=use '--policy download-source-native' or update "
+            "config/sources/slack.toml to fetch Slack-hosted files"
+        )
+        raise typer.Exit(code=0)
+
     result = download_slack_artifacts(
         paths,
         date=date,
@@ -146,3 +187,18 @@ def download_slack_artifact_bytes(
     typer.echo(f"skipped_policy={result.skipped_policy}")
     typer.echo(f"skipped_existing={result.skipped_existing}")
     typer.echo(f"failed={result.failed}")
+
+    if dry_run:
+        typer.echo("next_step=run without --dry-run to download source-native Slack file blobs")
+        return
+
+    if result.downloaded > 0:
+        typer.echo(f"next_step=run 'recall artifacts show --date {date}' to inspect local mirrors")
+        return
+
+    artifacts = read_jsonl(result.artifact_path)
+    if any(_looks_like_slack_scope_error(artifact.get("last_error")) for artifact in artifacts):
+        typer.echo(
+            "hint=Slack file download may require the 'files:read' user scope. "
+            "After adding it, reinstall or refresh the token and try again."
+        )
