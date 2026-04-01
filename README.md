@@ -300,7 +300,8 @@ recall init
 
 Configure Slack capture by copying `config/sources/slack.toml.example` to
 `config/sources/slack.toml` and exporting the configured token environment
-variable.
+variable. Keep `artifact_download_policy = "metadata-only"` unless you
+explicitly want Recall to download source-native Slack file objects.
 
 Capture and normalize one day of Slack data:
 
@@ -309,6 +310,9 @@ recall capture slack --date 2026-03-31
 recall capture slack --incremental --since 2026-03-31T00:00:00Z
 recall normalize slack --date 2026-03-31
 recall entities sync slack --date 2026-03-31
+recall artifacts show --date 2026-03-31
+recall artifacts download slack --date 2026-03-31 --dry-run
+recall artifacts download slack --date 2026-03-31
 recall state show slack
 recall events show --date 2026-03-31
 ```

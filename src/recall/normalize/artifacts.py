@@ -27,6 +27,7 @@ class NormalizedArtifact:
     size_bytes: int | None = None
     checksums: dict[str, str] = field(default_factory=dict)
     download_status: str = "not_requested"
+    last_error: str | None = None
     observed_at: str | None = None
     raw_ref: RawReference | None = None
 

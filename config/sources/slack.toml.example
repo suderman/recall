@@ -1,3 +1,4 @@
 account = "default"
 token_env_var = "SLACK_USER_TOKEN"
 include_archived = false
+artifact_download_policy = "metadata-only"

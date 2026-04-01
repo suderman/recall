@@ -12,6 +12,7 @@ class SlackSourceConfig:
     account: str = "default"
     token_env_var: str = "SLACK_USER_TOKEN"
     include_archived: bool = False
+    artifact_download_policy: str = "metadata-only"
 
 
 def slack_config_path(paths: RecallPaths) -> Path:
@@ -28,4 +29,5 @@ def load_slack_config(paths: RecallPaths) -> SlackSourceConfig:
         account=str(data.get("account", "default")),
         token_env_var=str(data.get("token_env_var", "SLACK_USER_TOKEN")),
         include_archived=bool(data.get("include_archived", False)),
+        artifact_download_policy=str(data.get("artifact_download_policy", "metadata-only")),
     )

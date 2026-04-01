@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 
 from recall import __version__
+from recall.cli.artifacts import download_slack_artifact_bytes, show_artifacts
 from recall.cli.events import show_events
 from recall.config import resolve_root
 from recall.connectors.slack.cli import (
@@ -20,6 +21,8 @@ app = typer.Typer(help="Recall command-line interface.", no_args_is_help=True)
 capture_app = typer.Typer(help="Capture raw evidence from source systems.")
 normalize_app = typer.Typer(help="Normalize captured evidence into daily events.")
 events_app = typer.Typer(help="Inspect normalized events.")
+artifacts_app = typer.Typer(help="Inspect normalized artifact metadata.")
+artifacts_download_app = typer.Typer(help="Download source-native artifact bytes.")
 entities_app = typer.Typer(help="Manage identity and entity storage.")
 entities_sync_app = typer.Typer(help="Sync source identities into SQLite.")
 state_app = typer.Typer(help="Inspect operational connector state.")
@@ -28,10 +31,12 @@ state_show_app = typer.Typer(help="Show stored connector state.")
 app.add_typer(capture_app, name="capture")
 app.add_typer(normalize_app, name="normalize")
 app.add_typer(events_app, name="events")
+app.add_typer(artifacts_app, name="artifacts")
 app.add_typer(entities_app, name="entities")
 app.add_typer(state_app, name="state")
 entities_app.add_typer(entities_sync_app, name="sync")
 state_app.add_typer(state_show_app, name="show")
+artifacts_app.add_typer(artifacts_download_app, name="download")
 
 
 def _load_paths(root: Path | None) -> RecallPaths:
@@ -96,6 +101,8 @@ def version() -> None:
 capture_app.command("slack")(capture_slack)
 normalize_app.command("slack")(normalize_slack)
 events_app.command("show")(show_events)
+artifacts_app.command("show")(show_artifacts)
+artifacts_download_app.command("slack")(download_slack_artifact_bytes)
 entities_sync_app.command("slack")(sync_slack_entities)
 state_show_app.command("slack")(show_slack_state)
 

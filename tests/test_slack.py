@@ -6,6 +6,9 @@ import sqlite3
 from decimal import Decimal
 from pathlib import Path
 
+import httpx
+
+from recall.connectors.slack.artifacts import download_slack_artifacts
 from recall.connectors.slack.capture import (
     SLACK_CURSOR_KEY,
     capture_slack_day,
@@ -188,6 +191,21 @@ class IncrementalSlackClient:
         return [dict(row) for row in self.replies.get((channel_id, ts), [])]
 
 
+class FakeArtifactStreamClient:
+    def __init__(self, payloads: dict[str, bytes]) -> None:
+        self.payloads = payloads
+
+    def get(self, url: str, *, headers: dict[str, str]) -> httpx.Response:
+        assert headers["Authorization"].startswith("Bearer ")
+        request = httpx.Request("GET", url)
+        if url not in self.payloads:
+            return httpx.Response(404, request=request)
+        return httpx.Response(200, request=request, content=self.payloads[url])
+
+    def close(self) -> None:
+        return None
+
+
 def copy_fixture_capture(tmp_path: Path) -> RecallPaths:
     paths = RecallPaths.from_root(tmp_path)
     target_dir = paths.raw_capture_dir("slack", "2026-03-31")
@@ -357,6 +375,139 @@ def test_normalize_slack_day_is_replayable_from_same_raw_capture(tmp_path) -> No
 
     assert first_path == second_path
     assert first_output == second_output
+
+
+def test_download_slack_artifacts_respects_metadata_only_policy(tmp_path) -> None:
+    paths = copy_fixture_capture(tmp_path)
+    normalize_slack_day(paths, date="2026-03-31")
+
+    result = download_slack_artifacts(
+        paths,
+        date="2026-03-31",
+        token="xoxp-test",
+        policy="metadata-only",
+        client=FakeArtifactStreamClient({}),
+    )
+
+    assert result.artifacts_seen == 1
+    assert result.would_download == 0
+    assert result.downloaded == 0
+    assert result.skipped_policy == 1
+
+    artifact_path = paths.artifact_metadata_path("slack", "2026-03-31")
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8").splitlines()[0])
+    assert artifact["download_status"] == "not_requested"
+    assert artifact["local_path"] is None
+    assert artifact["checksums"] == {}
+    assert artifact["last_error"] is None
+
+
+def test_download_slack_artifacts_dry_run_leaves_metadata_unchanged(tmp_path) -> None:
+    paths = copy_fixture_capture(tmp_path)
+    normalize_slack_day(paths, date="2026-03-31")
+    client = FakeArtifactStreamClient(
+        {"https://files.slack.com/files-pri/T123-F123/download/diagram.png": b"png-bytes"}
+    )
+    artifact_path = paths.artifact_metadata_path("slack", "2026-03-31")
+    before = artifact_path.read_text(encoding="utf-8")
+
+    result = download_slack_artifacts(
+        paths,
+        date="2026-03-31",
+        token="xoxp-test",
+        policy="download-source-native",
+        client=client,
+        dry_run=True,
+    )
+
+    assert result.artifacts_seen == 1
+    assert result.would_download == 1
+    assert result.downloaded == 0
+    assert result.failed == 0
+    assert artifact_path.read_text(encoding="utf-8") == before
+
+
+def test_download_slack_artifacts_downloads_source_native_file(tmp_path) -> None:
+    paths = copy_fixture_capture(tmp_path)
+    normalize_slack_day(paths, date="2026-03-31")
+    client = FakeArtifactStreamClient(
+        {"https://files.slack.com/files-pri/T123-F123/download/diagram.png": b"png-bytes"}
+    )
+
+    result = download_slack_artifacts(
+        paths,
+        date="2026-03-31",
+        token="xoxp-test",
+        policy="download-source-native",
+        client=client,
+    )
+
+    assert result.downloaded == 1
+    assert result.would_download == 1
+    assert result.failed == 0
+
+    artifact_path = paths.artifact_metadata_path("slack", "2026-03-31")
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8").splitlines()[0])
+    assert artifact["download_status"] == "downloaded"
+    assert artifact["local_path"] is not None
+    assert artifact["checksums"]["sha256"]
+    assert artifact["last_error"] is None
+
+    blob_path = paths.root / artifact["local_path"]
+    assert blob_path.exists()
+    assert blob_path.read_bytes() == b"png-bytes"
+
+
+def test_download_slack_artifacts_safe_rerun_skips_existing_blob(tmp_path) -> None:
+    paths = copy_fixture_capture(tmp_path)
+    normalize_slack_day(paths, date="2026-03-31")
+    client = FakeArtifactStreamClient(
+        {"https://files.slack.com/files-pri/T123-F123/download/diagram.png": b"png-bytes"}
+    )
+
+    first = download_slack_artifacts(
+        paths,
+        date="2026-03-31",
+        token="xoxp-test",
+        policy="download-source-native",
+        client=client,
+    )
+    second = download_slack_artifacts(
+        paths,
+        date="2026-03-31",
+        token="xoxp-test",
+        policy="download-source-native",
+        client=client,
+    )
+
+    assert first.downloaded == 1
+    assert second.downloaded == 0
+    assert second.would_download == 0
+    assert second.skipped_existing == 1
+
+
+def test_download_slack_artifacts_records_failure_detail(tmp_path) -> None:
+    paths = copy_fixture_capture(tmp_path)
+    normalize_slack_day(paths, date="2026-03-31")
+    client = FakeArtifactStreamClient({})
+
+    result = download_slack_artifacts(
+        paths,
+        date="2026-03-31",
+        token="xoxp-test",
+        policy="download-source-native",
+        client=client,
+    )
+
+    assert result.downloaded == 0
+    assert result.failed == 1
+    assert result.would_download == 1
+
+    artifact_path = paths.artifact_metadata_path("slack", "2026-03-31")
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8").splitlines()[0])
+    assert artifact["download_status"] == "failed"
+    assert "404 Not Found" in artifact["last_error"]
+    assert "T123-F123/download/diagram.png" in artifact["last_error"]
 
 
 def test_incremental_capture_without_cursor_uses_explicit_since(tmp_path) -> None:

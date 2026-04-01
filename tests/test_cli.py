@@ -7,8 +7,9 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from recall.cli.main import app
+from recall.normalize.artifacts import NormalizedArtifact, RemoteLocator
 from recall.normalize.events import NormalizedEvent, RawReference
-from recall.storage.jsonl import write_normalized_events
+from recall.storage.jsonl import write_artifact_metadata, write_normalized_events
 from recall.storage.paths import RecallPaths
 
 runner = CliRunner()
@@ -102,6 +103,133 @@ def test_events_show_json_outputs_event_list(tmp_path) -> None:
     assert result.exit_code == 0
     assert '"event_id": "evt_1"' in result.stdout
     assert '"text": "hello json"' in result.stdout
+
+
+def test_artifacts_show_reports_daily_artifacts(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    write_artifact_metadata(
+        paths,
+        source="slack",
+        date="2026-03-31",
+        artifacts=[
+            NormalizedArtifact(
+                artifact_id="artifact_1",
+                source="slack",
+                kind="file",
+                filename="diagram.png",
+                event_ids=["evt_1"],
+                remote_locators=[
+                    RemoteLocator(kind="url_private", value="https://files.example/test")
+                ],
+                download_status="not_requested",
+                raw_ref=RawReference(
+                    source="slack",
+                    path="data/raw/slack/2026-03-31/messages.jsonl",
+                    locator={"channel": "C123", "ts": "1774976467.000100", "file_id": "F123"},
+                ),
+            )
+        ],
+    )
+
+    result = runner.invoke(
+        app,
+        ["artifacts", "show", "--root", str(tmp_path), "--date", "2026-03-31", "--source", "slack"],
+    )
+
+    assert result.exit_code == 0
+    assert "date=2026-03-31" in result.stdout
+    assert "source=slack" in result.stdout
+    assert "diagram.png" in result.stdout
+    assert "artifact_id=artifact_1" in result.stdout
+    assert "local_path=- checksums=-" in result.stdout
+
+
+def test_artifacts_show_json_outputs_artifact_list(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    write_artifact_metadata(
+        paths,
+        source="slack",
+        date="2026-03-31",
+        artifacts=[NormalizedArtifact(artifact_id="artifact_1", source="slack", kind="file")],
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "artifacts",
+            "show",
+            "--root",
+            str(tmp_path),
+            "--date",
+            "2026-03-31",
+            "--source",
+            "slack",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert '"artifact_id": "artifact_1"' in result.stdout
+
+
+def test_artifacts_show_reports_downloaded_local_mirror(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    write_artifact_metadata(
+        paths,
+        source="slack",
+        date="2026-03-31",
+        artifacts=[
+            NormalizedArtifact(
+                artifact_id="artifact_1",
+                source="slack",
+                kind="file",
+                filename="diagram.png",
+                local_path="data/artifacts/blobs/slack/2026/2026-03-31/artifact_1--diagram.png",
+                checksums={"sha256": "abc123"},
+                download_status="downloaded",
+            )
+        ],
+    )
+
+    result = runner.invoke(
+        app,
+        ["artifacts", "show", "--root", str(tmp_path), "--date", "2026-03-31", "--source", "slack"],
+    )
+
+    assert result.exit_code == 0
+    assert "download_status=downloaded" in result.stdout
+    assert (
+        "local_path=data/artifacts/blobs/slack/2026/2026-03-31/artifact_1--diagram.png"
+        in result.stdout
+    )
+    assert "checksums=sha256:abc123" in result.stdout
+
+
+def test_artifacts_show_reports_download_failure_detail(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    write_artifact_metadata(
+        paths,
+        source="slack",
+        date="2026-03-31",
+        artifacts=[
+            NormalizedArtifact(
+                artifact_id="artifact_1",
+                source="slack",
+                kind="file",
+                download_status="failed",
+                last_error="404 Not Found",
+            )
+        ],
+    )
+
+    result = runner.invoke(
+        app,
+        ["artifacts", "show", "--root", str(tmp_path), "--date", "2026-03-31", "--source", "slack"],
+    )
+
+    assert result.exit_code == 0
+    assert "download_status=failed" in result.stdout
+    assert "last_error=404 Not Found" in result.stdout
 
 
 def test_entities_sync_slack_persists_identity_rows(tmp_path) -> None:
