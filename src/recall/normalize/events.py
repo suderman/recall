@@ -25,7 +25,8 @@ class NormalizedEvent:
     sender_identity_id: str | None = None
     participant_identity_ids: list[str] = field(default_factory=list)
     text: str | None = None
-    url: str | None = None
+    source_urls: list[str] = field(default_factory=list)
+    artifact_ids: list[str] = field(default_factory=list)
     raw_ref: RawReference | None = None
     raw_fragment: dict[str, Any] | None = None
     tags: list[str] = field(default_factory=list)

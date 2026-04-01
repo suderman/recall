@@ -79,6 +79,7 @@ def paths(
     typer.echo(f"sources_config={current.sources_config}")
     typer.echo(f"raw={current.raw}")
     typer.echo(f"normalized={current.normalized}")
+    typer.echo(f"artifacts={current.artifacts}")
     typer.echo(f"entities={current.entities}")
     typer.echo(f"derived={current.derived}")
     typer.echo(f"state={current.state}")

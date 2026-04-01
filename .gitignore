@@ -9,5 +9,6 @@ dist/
 .env
 data/raw/
 data/normalized/
+data/artifacts/
 data/derived/
 data/state/

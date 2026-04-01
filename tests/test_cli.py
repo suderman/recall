@@ -39,6 +39,7 @@ def test_paths_reports_workspace_locations(tmp_path) -> None:
 
     assert result.exit_code == 0
     assert f"root={tmp_path.resolve()}" in result.stdout
+    assert f"artifacts={tmp_path.resolve() / 'data' / 'artifacts'}" in result.stdout
     assert f"database={tmp_path.resolve() / 'data' / 'state' / 'recall.sqlite3'}" in result.stdout
 
 

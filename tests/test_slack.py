@@ -52,6 +52,17 @@ class FakeSlackClient:
         if channel_id == "C123":
             return [
                 {
+                    "files": [
+                        {
+                            "id": "F123",
+                            "mimetype": "image/png",
+                            "name": "diagram.png",
+                            "permalink": "https://workspace.slack.com/files/USELF/F123/diagram.png",
+                            "size": 482193,
+                            "url_private": "https://files.slack.com/files-pri/T123-F123/diagram.png",
+                            "url_private_download": "https://files.slack.com/files-pri/T123-F123/download/diagram.png",
+                        }
+                    ],
                     "ts": "1774976467.000100",
                     "user": "USELF",
                     "text": "Hey <@UPEER> review <https://example.com|this>",
@@ -91,6 +102,17 @@ class IncrementalSlackClient:
         self.history = {
             "C123": [
                 {
+                    "files": [
+                        {
+                            "id": "F123",
+                            "mimetype": "image/png",
+                            "name": "diagram.png",
+                            "permalink": "https://workspace.slack.com/files/USELF/F123/diagram.png",
+                            "size": 482193,
+                            "url_private": "https://files.slack.com/files-pri/T123-F123/diagram.png",
+                            "url_private_download": "https://files.slack.com/files-pri/T123-F123/download/diagram.png",
+                        }
+                    ],
                     "ts": "1774976467.000100",
                     "user": "USELF",
                     "text": "Hey <@UPEER> review <https://example.com|this>",
@@ -204,20 +226,30 @@ def test_normalize_slack_day_builds_daily_events(tmp_path) -> None:
     paths = copy_fixture_capture(tmp_path)
 
     normalized_path = normalize_slack_day(paths, date="2026-03-31")
+    artifact_path = paths.artifact_metadata_path("slack", "2026-03-31")
 
     assert normalized_path == tmp_path / "data" / "normalized" / "2026" / "2026-03-31.jsonl"
+    assert (
+        artifact_path
+        == tmp_path / "data" / "artifacts" / "metadata" / "slack" / "2026" / "2026-03-31.jsonl"
+    )
 
     records = [
         json.loads(line) for line in normalized_path.read_text(encoding="utf-8").splitlines()
     ]
+    artifact_records = [
+        json.loads(line) for line in artifact_path.read_text(encoding="utf-8").splitlines()
+    ]
     assert len(records) == 4
+    assert len(artifact_records) == 1
 
     first = records[0]
     assert first["conversation_label"] == "#webteam"
     assert first["sender_identity_id"] == "ident_slack_USELF"
     assert first["participant_identity_ids"] == ["ident_slack_UPEER", "ident_slack_USELF"]
-    assert first["text"] == "Hey @Ariel review this (https://example.com)"
-    assert first["url"] == "https://example.com"
+    assert first["text"] == "Hey <@UPEER> review <https://example.com|this>"
+    assert first["source_urls"] == ["https://example.com"]
+    assert len(first["artifact_ids"]) == 1
     assert first["raw_ref"] == {
         "source": "slack",
         "path": "data/raw/slack/2026-03-31/messages.jsonl",
@@ -229,9 +261,42 @@ def test_normalize_slack_day_builds_daily_events(tmp_path) -> None:
     assert first["raw_fragment"] is None
     assert first["tags"] == ["message"]
 
+    artifact = artifact_records[0]
+    assert artifact["artifact_id"] == first["artifact_ids"][0]
+    assert artifact["source_object_id"] == "F123"
+    assert artifact["filename"] == "diagram.png"
+    assert artifact["mime_type"] == "image/png"
+    assert artifact["size_bytes"] == 482193
+    assert artifact["download_status"] == "not_requested"
+    assert artifact["event_ids"] == [first["event_id"]]
+    assert artifact["remote_locators"] == [
+        {
+            "kind": "url_private",
+            "value": "https://files.slack.com/files-pri/T123-F123/diagram.png",
+        },
+        {
+            "kind": "url_private_download",
+            "value": "https://files.slack.com/files-pri/T123-F123/download/diagram.png",
+        },
+        {
+            "kind": "permalink",
+            "value": "https://workspace.slack.com/files/USELF/F123/diagram.png",
+        },
+    ]
+    assert artifact["raw_ref"] == {
+        "source": "slack",
+        "path": "data/raw/slack/2026-03-31/messages.jsonl",
+        "locator": {
+            "channel": "C123",
+            "ts": "1774976467.000100",
+            "file_id": "F123",
+        },
+    }
+
     bot_message = records[2]
     assert bot_message["sender_identity_id"] == "ident_slack_bot_BHELPER"
-    assert bot_message["url"] is None
+    assert bot_message["source_urls"] == []
+    assert bot_message["artifact_ids"] == []
 
     dm = records[3]
     assert dm["conversation_label"] == "DM:Ariel"

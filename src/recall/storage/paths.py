@@ -12,6 +12,9 @@ class RecallPaths:
     data: Path
     raw: Path
     normalized: Path
+    artifacts: Path
+    artifacts_metadata: Path
+    artifacts_blobs: Path
     entities: Path
     derived: Path
     state: Path
@@ -33,6 +36,9 @@ class RecallPaths:
             data=data,
             raw=data / "raw",
             normalized=data / "normalized",
+            artifacts=data / "artifacts",
+            artifacts_metadata=data / "artifacts" / "metadata",
+            artifacts_blobs=data / "artifacts" / "blobs",
             entities=data / "entities",
             derived=data / "derived",
             state=state,
@@ -49,6 +55,9 @@ class RecallPaths:
             self.data,
             self.raw,
             self.normalized,
+            self.artifacts,
+            self.artifacts_metadata,
+            self.artifacts_blobs,
             self.entities,
             self.derived,
             self.state,
@@ -60,6 +69,9 @@ class RecallPaths:
 
     def normalized_event_path(self, date: str) -> Path:
         return self.normalized / date[:4] / f"{date}.jsonl"
+
+    def artifact_metadata_path(self, source: str, date: str) -> Path:
+        return self.artifacts_metadata / source / date[:4] / f"{date}.jsonl"
 
     def raw_capture_dir(self, source: str, date: str) -> Path:
         return self.raw / source / date

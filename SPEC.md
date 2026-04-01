@@ -31,6 +31,27 @@ Each connector should know its source well, but the core system must not become 
 ### 2.7 Provenance is mandatory
 Every normalized event should retain a traceable path back to its raw source.
 
+### 2.8 First-class artifacts
+Attachments, files, images, and other source-native media are first-class evidence.
+
+They must not be treated as incidental text decorations on messages.
+
+Recall should preserve:
+- source-native attachment/file metadata
+- source object ids where available
+- remote/provider locators
+- linkage from events to artifacts
+- optional local downloaded mirrors when policy allows
+
+### 2.9 Recall is not a web archiver
+Recall archives source-native evidence from the systems it connects to.
+It does **not** crawl, snapshot, or archive arbitrary web pages just because a URL appears in text.
+
+Rules:
+- preserve pasted URLs as link metadata only
+- do not fetch arbitrary external web pages for archival purposes
+- only download provider-hosted or source-native attachment/file/media objects when explicitly in scope
+
 ## 3. Primary goals
 
 Recall should eventually support:
@@ -55,7 +76,7 @@ Early versions should **not** try to:
 
 ## 5. System layers
 
-Recall has five layers.
+Recall has six layers.
 
 ### 5.1 Connectors
 Source-specific capture or import logic.
@@ -90,13 +111,29 @@ Examples:
 - notmuch
 - khal / local vdir calendars
 
-### 5.3 Normalization
+### 5.3 Artifact layer
+Artifacts are first-class evidence objects associated with events.
+
+Examples:
+- Slack file objects
+- Telegram photos, documents, voice notes, videos
+- BlueBubbles/iMessage attachments
+- email attachments
+- files embedded in imported export bundles
+
+Artifacts may be represented in two forms:
+- metadata-only records
+- metadata plus an optional local downloaded mirror
+
+Artifacts augment the archive but do not replace raw source records.
+
+### 5.4 Normalization
 Transform raw or locally queried data into a common normalized event contract.
 
-### 5.4 Entity resolution
+### 5.5 Entity resolution
 Resolve identities, people, and later other entities such as organizations, projects, and places.
 
-### 5.5 Derived views
+### 5.6 Derived views
 Generate journals, worklogs, reports, and timeline views from normalized events plus entity resolution.
 
 ## 6. Canonical storage model
@@ -132,10 +169,28 @@ Use SQLite for:
 - people
 - aliases
 - resolutions
+- artifact indexes and download state
 - query acceleration
 - later projections and caches
 
 Do **not** let SQLite become the only place where important provenance or replay logic lives.
+
+### 6.4 Artifact metadata and local mirrors
+Artifacts are additive archive objects, not replacements for raw source payloads.
+
+Recommended storage shape:
+
+```text
+/data/artifacts/
+  metadata/
+  blobs/
+```
+
+Guidelines:
+- artifact metadata should remain inspectable and replay-safe
+- local downloaded files/media should preserve stable linkage back to source-native object ids and parent event provenance
+- local mirrors must not overwrite or replace original remote/source locators
+- if bytes are not downloaded, artifact metadata may still exist with status such as `not_requested`, `deferred`, or `failed`
 
 ## 7. Normalized event contract
 
@@ -159,8 +214,13 @@ Minimum v1 fields:
     "ident_slack_U024FEL01",
     "ident_slack_U08LWQMG6S3"
   ],
-  "text": "Downloadable Vimeo: ...",
-  "url": null,
+  "text": "Downloadable Vimeo: https://example.com/post/123",
+  "source_urls": [
+    "https://example.com/post/123"
+  ],
+  "artifact_ids": [
+    "artifact_slack_F024FEKMZ"
+  ],
   "raw_ref": {
     "source": "slack",
     "path": "data/raw/slack/2026-03-31/messages.jsonl",
@@ -178,17 +238,112 @@ Rules:
 - normalized events must preserve source ids
 - normalized events must preserve provenance
 - normalized events may reference identities even when people are unresolved
+- normalized events may reference zero or more first-class artifacts
+- normalized events must preserve original message text
+- normalized events must preserve original source-native URLs where relevant
+- normalized events must not replace remote/source locators with local-only paths
 - normalized events must remain replayable from raw input
 - normalized events should be append-only for a given normalization run, with explicit rerun semantics
 
-## 8. People and identity normalization
+## 8. Artifact model and download policy
+
+Artifacts are first-class evidence objects distinct from normalized events.
+
+### 8.1 Purpose
+Events describe what happened.
+Artifacts describe attached or provider-native evidence objects related to what happened.
+
+### 8.2 Artifact identity
+Prefer, in order:
+1. provider file/object id
+2. parent event/message provenance
+3. remote/source locator as fallback
+4. content hash for verification or dedupe after download
+
+Do not treat arbitrary pasted URLs as artifact identities.
+
+### 8.3 Minimum artifact fields
+A normalized artifact record should support at least:
+
+```json
+{
+  "artifact_id": "artifact_slack_F024FEKMZ",
+  "source": "slack",
+  "account": "work",
+  "kind": "file",
+  "source_object_id": "F024FEKMZ",
+  "event_ids": ["evt_..."],
+  "remote_locators": [
+    {
+      "kind": "provider_url",
+      "value": "https://files.slack.com/files-pri/..."
+    }
+  ],
+  "local_path": null,
+  "mime_type": "image/png",
+  "filename": "diagram.png",
+  "size_bytes": 482193,
+  "checksums": {},
+  "download_status": "not_requested",
+  "observed_at": "2026-03-31T17:31:07Z",
+  "raw_ref": {
+    "source": "slack",
+    "path": "data/raw/slack/2026-03-31/messages.jsonl",
+    "locator": {
+      "channel": "C024FEKMZ",
+      "ts": "1774978267.000000",
+      "file_id": "F024FEKMZ"
+    }
+  }
+}
+```
+
+### 8.4 Source-native vs external URLs
+In scope for artifact download:
+- provider-hosted file/media objects that are part of the source system
+- source-native attachment/file records
+- files/media embedded in imported export bundles
+
+Out of scope:
+- arbitrary links pasted into text
+- normal web pages
+- articles, blogs, profiles, product pages, and other open-web destinations
+- general web crawling or internet archiving
+
+### 8.5 Raw immutability
+Raw source files must remain unchanged after capture.
+
+Do not:
+- rewrite raw payloads
+- replace remote locators with local paths
+- strip attachment metadata out of raw records
+
+### 8.6 Additive local mirrors
+If Recall downloads source-native attachment bytes:
+- preserve the original remote/source locator
+- store local mirror metadata separately
+- record download status explicitly
+- record checksums when available
+- treat local mirrors as additive archive material, not canonical replacements
+
+### 8.7 Metadata-first policy
+Implementation order should be:
+1. artifact metadata capture
+2. optional byte download
+3. optional later extraction such as OCR or text extraction
+
+### 8.8 Replayability
+Artifact metadata should be reproducible from raw source evidence and explicit download policy.
+Downloaded byte mirrors may be regenerated or restored independently of normalized event replay.
+
+## 9. People and identity normalization
 
 People and identities must be modeled separately.
 
-### 8.1 Person
+### 9.1 Person
 A canonical human being.
 
-### 8.2 Identity
+### 9.2 Identity
 A source-specific handle, account, email, phone number, user ID, or address.
 
 Examples:
@@ -199,13 +354,13 @@ Examples:
 - phone number
 - social media account handle
 
-### 8.3 Alias
+### 9.3 Alias
 A textual label or display name associated with a person.
 
-### 8.4 Resolution
+### 9.4 Resolution
 Evidence that a given identity belongs to a person.
 
-### 8.5 Unresolved identities
+### 9.5 Unresolved identities
 These are valid and expected. Do not force weak matches.
 
 Important rule:
@@ -213,30 +368,30 @@ Important rule:
 
 People resolution can improve later without re-ingesting raw events.
 
-## 9. Connector categories
+## 10. Connector categories
 
-### 9.1 Remote pull connectors
+### 10.1 Remote pull connectors
 Examples:
 - Slack
 - Asana
 
 These usually capture data on demand or on a schedule and write raw artifacts.
 
-### 9.2 Always-on capture connectors
+### 10.2 Always-on capture connectors
 Examples:
 - Telegram via TDLib
 - BlueBubbles via webhooks
 
 These should append source-native events continuously and allow nightly synthesis later.
 
-### 9.3 Local query connectors
+### 10.3 Local query connectors
 Examples:
 - notmuch
 - khal / vdir
 
 These do not necessarily need a separate raw capture layer because the authoritative data is already local.
 
-### 9.4 Import connectors
+### 10.4 Import connectors
 Examples:
 - downloaded archives from social networks
 - export ZIPs
@@ -244,38 +399,38 @@ Examples:
 
 These should import archives into raw storage and then normalize from there.
 
-## 10. Current source strategy
+## 11. Current source strategy
 
-### 10.1 Slack
+### 11.1 Slack
 - nightly pull
 - raw artifacts on disk
 - normalized daily events
 - later incremental cursor/state in SQLite
 
-### 10.2 Telegram
+### 11.2 Telegram
 - always-on TDLib-backed capture service
 - local persistent database
 - append raw updates/messages
 - normalize downstream
 
-### 10.3 BlueBubbles
+### 11.3 BlueBubbles
 - always-on webhook receiver
 - append raw events
 - normalize downstream
 
-### 10.4 Email
+### 11.4 Email
 - query notmuch directly at synthesis or normalization time
 - raw capture not required initially
 
-### 10.5 Calendar
+### 11.5 Calendar
 - query khal / local calendar data directly at synthesis or normalization time
 - raw capture not required initially
 
-### 10.6 Future import-only sources
+### 11.6 Future import-only sources
 - treat archives as first-class raw evidence
 - normalize into the same event contract
 
-## 11. CLI shape
+## 12. CLI shape
 
 Recall should remain CLI-first.
 
@@ -295,7 +450,7 @@ Guidelines:
 - source-specific commands should live at the edge
 - derived-view commands should consume normalized data, not call raw connectors directly
 
-## 12. Project layout
+## 13. Project layout
 
 Preferred layout:
 
@@ -320,11 +475,12 @@ data/
   normalized/
   derived/
   state/
+  artifacts/
 tests/
 examples/
 ```
 
-## 13. Raw artifact conventions
+## 14. Raw artifact conventions
 
 Raw artifacts should be stable, source-native, and inspectable.
 
@@ -340,8 +496,37 @@ Rules:
 - prefer JSON or JSONL for intermediate storage
 - avoid lossy transformation during raw capture
 - do not mix normalized fields into raw artifacts
+- preserve source-native file or attachment objects exactly as captured
+- do not rewrite raw attachment URLs to local paths
+- do not remove provider payload details that may be needed for later download
+- do not follow arbitrary external URLs found in text
 
-## 14. State and incremental capture
+## 15. Artifact download policy
+
+Artifact download must be explicit and scoped.
+
+Rules:
+- metadata capture is the default
+- byte download is optional and policy-controlled
+- download policy applies only to source-native/provider-native attachments and media
+- arbitrary web links are never implicit download targets
+- download success or failure must be recorded explicitly
+- lack of download must not block event normalization
+
+Examples in scope:
+- Slack file objects
+- Telegram media/file objects
+- BlueBubbles attachments
+- email attachments
+- files inside imported archives
+
+Examples out of scope:
+- pasted article URLs
+- social profile URLs
+- normal websites
+- arbitrary external pages
+
+## 16. State and incremental capture
 
 Capture state belongs in SQLite.
 
@@ -356,7 +541,7 @@ Rules:
 - backfill must remain possible even if state is reset
 - raw artifact contracts should remain stable regardless of capture mode
 
-## 15. Testing strategy
+## 17. Testing strategy
 
 Recall should favor fixture-driven tests.
 
@@ -366,13 +551,15 @@ Priority areas:
 - provenance preservation
 - raw path generation
 - normalized event output
+- artifact metadata preservation
+- artifact reference integrity
 - identity extraction
 - date partitioning
 - replayability
 
 Golden-file tests are appropriate for normalized JSONL output.
 
-## 16. Development stack
+## 18. Development stack
 
 Preferred stack:
 - Python
@@ -385,7 +572,7 @@ Preferred stack:
 Frameworks should stay at the edges.
 The center of Recall should remain plain code, explicit schemas, and durable files.
 
-## 17. Near-term roadmap
+## 19. Near-term roadmap
 
 ### Phase 1
 Foundation and first connector.
@@ -400,18 +587,24 @@ Identity extraction for Slack into entity tables.
 Incremental Slack capture state.
 
 ### Phase 5
-Local-query integrations for email and calendar.
+Attachment metadata capture and artifact references.
 
 ### Phase 6
-Second major connector: likely Telegram or BlueBubbles.
+Optional source-native artifact download policy and storage.
 
 ### Phase 7
-Initial journal synthesis over normalized events plus identities.
+Local-query integrations for email and calendar.
 
 ### Phase 8
+Second major connector: likely Telegram or BlueBubbles.
+
+### Phase 9
+Initial journal synthesis over normalized events plus identities.
+
+### Phase 10
 Historical backfill and import pipeline for old life data.
 
-## 18. Decision rules for future work
+## 20. Decision rules for future work
 
 When adding a new source, answer these questions first:
 
@@ -422,8 +615,11 @@ When adding a new source, answer these questions first:
 5. What identities does this source introduce?
 6. Can this connector support both incremental capture and historical backfill?
 7. What is the minimum useful vertical slice?
+8. Does this source expose source-native attachments or media objects?
+9. What counts as source-native artifact metadata versus arbitrary external links?
+10. What is the explicit download policy boundary for this source?
 
-## 19. Architectural guardrails
+## 21. Architectural guardrails
 
 Do not:
 - couple journal synthesis directly to source connectors
@@ -432,6 +628,10 @@ Do not:
 - force premature people resolution
 - normalize away important source-native ids
 - design for every future connector before building the next real one
+- mutate raw capture after the fact
+- replace original source URLs with local-only paths
+- silently treat pasted web links as artifact download targets
+- drift into general internet archiving
 
 Do:
 - preserve raw evidence
@@ -440,12 +640,16 @@ Do:
 - keep artifacts inspectable
 - build thin vertical slices
 - generalize only after real data pressures the model
+- preserve both remote locators and local mirrors when downloads occur
+- model artifacts as first-class evidence
+- keep download policy explicit and source-scoped
 
-## 20. Definition of success
+## 22. Definition of success
 
 Recall is succeeding when:
 - new sources can be added without distorting the core
 - normalized daily events can be rebuilt from raw evidence
+- source-native attachments and media can be preserved without turning Recall into a web archiver
 - identities can be resolved over time without re-capturing sources
 - daily journals and worklogs can be synthesized from normalized data
 - historical backfill is possible, not just forward capture

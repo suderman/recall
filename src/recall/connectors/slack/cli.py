@@ -159,8 +159,10 @@ def normalize_slack(
     paths = _paths_for(root)
     paths.ensure_directories()
     normalized_path = normalize_slack_day(paths, date=date)
+    artifact_path = paths.artifact_metadata_path("slack", date)
     typer.echo(f"Normalized Slack events for {date}")
     typer.echo(f"events={normalized_path}")
+    typer.echo(f"artifacts={artifact_path}")
 
 
 def sync_slack_entities(
