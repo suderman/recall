@@ -10,7 +10,6 @@ from recall.connectors.slack.cli import capture_slack, normalize_slack
 from recall.storage.db import initialize_database
 from recall.storage.paths import RecallPaths
 
-
 app = typer.Typer(help="Recall command-line interface.", no_args_is_help=True)
 capture_app = typer.Typer(help="Capture raw evidence from source systems.")
 normalize_app = typer.Typer(help="Normalize captured evidence into daily events.")
@@ -61,6 +60,7 @@ def paths(
     current = _load_paths(root)
     typer.echo(f"root={current.root}")
     typer.echo(f"config={current.config}")
+    typer.echo(f"sources_config={current.sources_config}")
     typer.echo(f"raw={current.raw}")
     typer.echo(f"normalized={current.normalized}")
     typer.echo(f"entities={current.entities}")

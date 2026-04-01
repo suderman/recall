@@ -1,0 +1,26 @@
+{
+  "account": "work",
+  "captured_at": "2026-03-31T20:00:00Z",
+  "date": "2026-03-31",
+  "format_version": 1,
+  "latest": "1775015999.999",
+  "oldest": "1774929600.000",
+  "source": "slack",
+  "stats": {
+    "active": 2,
+    "checked": 2,
+    "skipped_archived": 0,
+    "stored_messages": 3,
+    "threads_expanded": 1,
+    "top_level_messages": 2,
+    "total_listed": 2
+  },
+  "team": "Example Workspace",
+  "team_id": "T123",
+  "user": "jon",
+  "user_id": "USELF",
+  "users": {
+    "UPEER": "Ariel",
+    "USELF": "Jon"
+  }
+}

@@ -298,6 +298,17 @@ Initialize the workspace and state database:
 recall init
 ```
 
+Configure Slack capture by copying `config/sources/slack.toml.example` to
+`config/sources/slack.toml` and exporting the configured token environment
+variable.
+
+Capture and normalize one day of Slack data:
+
+```bash
+recall capture slack --date 2026-03-31
+recall normalize slack --date 2026-03-31
+```
+
 Run the test suite:
 
 ```bash

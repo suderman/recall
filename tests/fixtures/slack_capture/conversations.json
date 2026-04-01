@@ -1,0 +1,28 @@
+[
+  {
+    "id": "D456",
+    "is_archived": false,
+    "is_im": true,
+    "is_mpim": false,
+    "is_private": false,
+    "kind": "im",
+    "label": "DM:Ariel",
+    "name": null,
+    "other_user_id": "UPEER",
+    "purpose": null,
+    "top_level_message_count": 1
+  },
+  {
+    "id": "C123",
+    "is_archived": false,
+    "is_im": false,
+    "is_mpim": false,
+    "is_private": false,
+    "kind": "public_channel",
+    "label": "#webteam",
+    "name": "webteam",
+    "other_user_id": null,
+    "purpose": null,
+    "top_level_message_count": 1
+  }
+]

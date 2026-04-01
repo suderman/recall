@@ -8,6 +8,7 @@ from pathlib import Path
 class RecallPaths:
     root: Path
     config: Path
+    sources_config: Path
     data: Path
     raw: Path
     normalized: Path
@@ -28,6 +29,7 @@ class RecallPaths:
         return cls(
             root=root,
             config=root / "config",
+            sources_config=root / "config" / "sources",
             data=data,
             raw=data / "raw",
             normalized=data / "normalized",
@@ -43,6 +45,7 @@ class RecallPaths:
     def ensure_directories(self) -> None:
         for directory in (
             self.config,
+            self.sources_config,
             self.data,
             self.raw,
             self.normalized,
@@ -57,3 +60,9 @@ class RecallPaths:
 
     def normalized_event_path(self, date: str) -> Path:
         return self.normalized / date[:4] / f"{date}.jsonl"
+
+    def raw_capture_dir(self, source: str, date: str) -> Path:
+        return self.raw / source / date
+
+    def relative_to_root(self, path: Path) -> str:
+        return path.resolve().relative_to(self.root).as_posix()

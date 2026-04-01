@@ -51,6 +51,7 @@
         devShells.default = pkgs.mkShell {
           packages = [
             pythonEnv
+            self.packages.${system}.default
             pkgs.sqlite
             pkgs.uv
           ];

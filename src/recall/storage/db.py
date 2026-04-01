@@ -7,7 +7,6 @@ from sqlalchemy import Engine
 
 from recall.storage.paths import RecallPaths
 
-
 metadata = sa.MetaData()
 
 persons = sa.Table(
