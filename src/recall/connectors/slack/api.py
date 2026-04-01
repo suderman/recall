@@ -89,7 +89,14 @@ class SlackApiClient:
             if cursor is None:
                 return conversations
 
-    def fetch_history(self, channel_id: str, *, oldest: str, latest: str) -> list[dict[str, Any]]:
+    def fetch_history(
+        self,
+        channel_id: str,
+        *,
+        oldest: str,
+        latest: str,
+        inclusive: bool = True,
+    ) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
         cursor: str | None = None
 
@@ -100,7 +107,7 @@ class SlackApiClient:
                     "channel": channel_id,
                     "oldest": oldest,
                     "latest": latest,
-                    "inclusive": "true",
+                    "inclusive": str(inclusive).lower(),
                     "limit": 200,
                     "cursor": cursor,
                 },

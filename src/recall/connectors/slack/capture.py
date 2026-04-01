@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from recall.storage.paths import RecallPaths
+from recall.storage.state import ConnectorCursor, set_connector_cursor
 
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+SLACK_CURSOR_KEY = "latest_message_ts"
 
 
 class SlackCaptureClient(Protocol):
@@ -22,7 +24,7 @@ class SlackCaptureClient(Protocol):
     def list_conversations(self, *, include_archived: bool = True) -> list[dict[str, Any]]: ...
 
     def fetch_history(
-        self, channel_id: str, *, oldest: str, latest: str
+        self, channel_id: str, *, oldest: str, latest: str, inclusive: bool = True
     ) -> list[dict[str, Any]]: ...
 
     def fetch_replies(self, channel_id: str, *, ts: str) -> list[dict[str, Any]]: ...
@@ -35,6 +37,30 @@ class SlackCaptureResult:
     conversations_path: Path
     messages_path: Path
     stats: dict[str, int]
+
+
+@dataclass(frozen=True, slots=True)
+class SlackWindowCapture:
+    auth: dict[str, Any]
+    account: str
+    oldest: str
+    latest: str
+    users: dict[str, str]
+    conversations: list[dict[str, Any]]
+    messages: list[dict[str, Any]]
+    stats: dict[str, int]
+
+
+@dataclass(frozen=True, slots=True)
+class SlackIncrementalCaptureResult:
+    account: str
+    oldest: str
+    latest: str
+    cursor_before: str | None
+    cursor_after: str | None
+    dates_written: list[str]
+    stored_messages: int
+    cursor_updated: bool
 
 
 def parse_date(value: str) -> date_type:
@@ -50,6 +76,19 @@ def local_day_bounds(value: str) -> tuple[str, str]:
     start = datetime.combine(target_date, time(0, 0, 0), tzinfo=local_tz)
     end = datetime.combine(target_date, time(23, 59, 59, 999000), tzinfo=local_tz)
     return (f"{start.timestamp():.3f}", f"{end.timestamp():.3f}")
+
+
+def iso_datetime_to_slack_ts(value: str) -> str:
+    normalized = value.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return f"{parsed.timestamp():.3f}"
+
+
+def local_date_for_ts(value: str) -> str:
+    timestamp = datetime.fromtimestamp(float(value), tz=timezone.utc).astimezone()
+    return timestamp.date().isoformat()
 
 
 def normalize_whitespace(value: str | None) -> str:
@@ -145,6 +184,12 @@ def ts_sort_key(value: str | None) -> Decimal:
         return Decimal("0")
 
 
+def max_ts(values: list[str]) -> str | None:
+    if not values:
+        return None
+    return max(values, key=ts_sort_key)
+
+
 def message_author(message: dict[str, Any], user_lookup: dict[str, str]) -> str:
     user_id = message.get("user")
     if user_id:
@@ -166,6 +211,19 @@ def raw_capture_paths(paths: RecallPaths, date: str) -> tuple[Path, Path, Path, 
     )
 
 
+def read_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                rows.append(json.loads(line))
+    return rows
+
+
 def write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -181,19 +239,15 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
             handle.write("\n")
 
 
-def capture_slack_day(
-    paths: RecallPaths,
-    *,
+def collect_slack_window(
     client: SlackCaptureClient,
-    date: str,
+    *,
     account: str,
+    oldest: str,
+    latest: str,
     include_archived: bool = False,
-) -> SlackCaptureResult:
-    parse_date(date)
-    paths.ensure_directories()
-    raw_dir, metadata_path, conversations_path, messages_path = raw_capture_paths(paths, date)
-    oldest, latest = local_day_bounds(date)
-
+    inclusive: bool = True,
+) -> SlackWindowCapture:
     auth = client.auth_test()
     users = client.list_users()
     user_lookup = build_user_lookup(users)
@@ -220,7 +274,12 @@ def capture_slack_day(
         stats["checked"] += 1
         history = [
             message
-            for message in client.fetch_history(conversation["id"], oldest=oldest, latest=latest)
+            for message in client.fetch_history(
+                conversation["id"],
+                oldest=oldest,
+                latest=latest,
+                inclusive=inclusive,
+            )
             if should_keep_message(message)
         ]
 
@@ -292,8 +351,93 @@ def capture_slack_day(
         )
     )
     stats["stored_messages"] = len(message_rows)
+    conversation_rows.sort(key=lambda row: (row["label"], row["id"]))
 
-    metadata = {
+    return SlackWindowCapture(
+        auth=auth,
+        account=account,
+        oldest=oldest,
+        latest=latest,
+        users=user_lookup,
+        conversations=conversation_rows,
+        messages=message_rows,
+        stats=stats,
+    )
+
+
+def message_row_key(row: dict[str, Any]) -> tuple[str, str, str, str | None]:
+    return (
+        str(row["conversation_id"]),
+        str(row["message"].get("ts")),
+        str(row.get("captured_via") or "history"),
+        str(row.get("parent_ts")) if row.get("parent_ts") is not None else None,
+    )
+
+
+def merge_message_rows(
+    existing_rows: list[dict[str, Any]],
+    new_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: dict[tuple[str, str, str, str | None], dict[str, Any]] = {}
+    for row in existing_rows + new_rows:
+        merged[message_row_key(row)] = row
+
+    return sorted(
+        merged.values(),
+        key=lambda row: (
+            row["conversation_label"],
+            ts_sort_key(row["message"].get("thread_ts") or row["message"].get("ts")),
+            ts_sort_key(row["message"].get("ts")),
+        ),
+    )
+
+
+def merge_conversation_rows(
+    existing_rows: list[dict[str, Any]],
+    new_rows: list[dict[str, Any]],
+    merged_messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged = {row["id"]: row for row in existing_rows}
+    for row in new_rows:
+        merged[row["id"]] = row
+
+    top_level_counts: dict[str, int] = {}
+    for row in merged_messages:
+        if row.get("captured_via") == "history":
+            conversation_id = str(row["conversation_id"])
+            top_level_counts[conversation_id] = top_level_counts.get(conversation_id, 0) + 1
+
+    conversation_rows: list[dict[str, Any]] = []
+    active_ids = {row["conversation_id"] for row in merged_messages}
+    for conversation_id in sorted(active_ids):
+        row = dict(merged[conversation_id])
+        row["top_level_message_count"] = top_level_counts.get(conversation_id, 0)
+        conversation_rows.append(row)
+
+    conversation_rows.sort(key=lambda row: (row["label"], row["id"]))
+    return conversation_rows
+
+
+def build_day_metadata(
+    *,
+    date: str,
+    account: str,
+    auth: dict[str, Any],
+    users: dict[str, str],
+    conversations: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+) -> dict[str, Any]:
+    message_ts = [str(row["message"]["ts"]) for row in messages]
+    top_level_messages = sum(1 for row in messages if row.get("captured_via") == "history")
+    threads_expanded = len(
+        {
+            str(row["parent_ts"])
+            for row in messages
+            if row.get("captured_via") == "thread" and row.get("parent_ts") is not None
+        }
+    )
+
+    return {
         "format_version": 1,
         "source": "slack",
         "account": account,
@@ -303,23 +447,200 @@ def capture_slack_day(
         "team_id": auth.get("team_id"),
         "user": auth.get("user"),
         "user_id": auth.get("user_id"),
-        "oldest": oldest,
-        "latest": latest,
-        "users": user_lookup,
-        "stats": stats,
+        "oldest": min(message_ts, key=ts_sort_key) if message_ts else None,
+        "latest": max(message_ts, key=ts_sort_key) if message_ts else None,
+        "users": users,
+        "stats": {
+            "total_listed": len(conversations),
+            "checked": len(conversations),
+            "active": len({row["conversation_id"] for row in messages}),
+            "skipped_archived": sum(1 for row in conversations if row.get("is_archived")),
+            "top_level_messages": top_level_messages,
+            "stored_messages": len(messages),
+            "threads_expanded": threads_expanded,
+        },
     }
 
-    conversation_rows.sort(key=lambda row: (row["label"], row["id"]))
+
+def write_day_capture(
+    paths: RecallPaths,
+    *,
+    date: str,
+    account: str,
+    auth: dict[str, Any],
+    users: dict[str, str],
+    conversations: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+) -> SlackCaptureResult:
+    raw_dir, metadata_path, conversations_path, messages_path = raw_capture_paths(paths, date)
+    metadata = build_day_metadata(
+        date=date,
+        account=account,
+        auth=auth,
+        users=users,
+        conversations=conversations,
+        messages=messages,
+    )
+
     write_json(metadata_path, metadata)
-    write_json(conversations_path, conversation_rows)
-    write_jsonl(messages_path, message_rows)
+    write_json(conversations_path, conversations)
+    write_jsonl(messages_path, messages)
 
     return SlackCaptureResult(
         raw_dir=raw_dir,
         metadata_path=metadata_path,
         conversations_path=conversations_path,
         messages_path=messages_path,
-        stats=stats,
+        stats=metadata["stats"],
+    )
+
+
+def merge_day_capture(
+    paths: RecallPaths,
+    *,
+    date: str,
+    account: str,
+    auth: dict[str, Any],
+    users: dict[str, str],
+    conversations: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+) -> SlackCaptureResult:
+    raw_dir, metadata_path, conversations_path, messages_path = raw_capture_paths(paths, date)
+    existing_metadata = read_json(metadata_path) if metadata_path.exists() else None
+    existing_conversations = read_json(conversations_path) if conversations_path.exists() else []
+    existing_messages = read_jsonl(messages_path) if messages_path.exists() else []
+
+    merged_users = dict(existing_metadata.get("users", {}) if existing_metadata else {})
+    merged_users.update(users)
+    merged_messages = merge_message_rows(existing_messages, messages)
+    merged_conversations = merge_conversation_rows(
+        existing_conversations, conversations, merged_messages
+    )
+
+    return write_day_capture(
+        paths,
+        date=date,
+        account=account,
+        auth=auth,
+        users=merged_users,
+        conversations=merged_conversations,
+        messages=merged_messages,
+    )
+
+
+def capture_slack_day(
+    paths: RecallPaths,
+    *,
+    client: SlackCaptureClient,
+    date: str,
+    account: str,
+    include_archived: bool = False,
+) -> SlackCaptureResult:
+    parse_date(date)
+    paths.ensure_directories()
+    oldest, latest = local_day_bounds(date)
+    capture = collect_slack_window(
+        client,
+        account=account,
+        oldest=oldest,
+        latest=latest,
+        include_archived=include_archived,
+        inclusive=True,
+    )
+    return write_day_capture(
+        paths,
+        date=date,
+        account=account,
+        auth=capture.auth,
+        users=capture.users,
+        conversations=capture.conversations,
+        messages=capture.messages,
+    )
+
+
+def capture_slack_incremental(
+    paths: RecallPaths,
+    *,
+    client: SlackCaptureClient,
+    account: str,
+    cursor_before: ConnectorCursor | None,
+    since: str | None,
+    until: str | None,
+    include_archived: bool = False,
+) -> SlackIncrementalCaptureResult:
+    paths.ensure_directories()
+
+    if cursor_before is None and since is None:
+        raise ValueError(
+            "Incremental capture requires an existing cursor or an explicit --since value"
+        )
+
+    if cursor_before is not None:
+        oldest = cursor_before.cursor_value
+    else:
+        assert since is not None
+        oldest = iso_datetime_to_slack_ts(since)
+    latest = (
+        iso_datetime_to_slack_ts(until)
+        if until is not None
+        else f"{datetime.now().timestamp():.3f}"
+    )
+    capture = collect_slack_window(
+        client,
+        account=account,
+        oldest=oldest,
+        latest=latest,
+        include_archived=include_archived,
+        inclusive=cursor_before is None,
+    )
+
+    messages_by_date: dict[str, list[dict[str, Any]]] = {}
+    for row in capture.messages:
+        date = local_date_for_ts(str(row["message"]["ts"]))
+        messages_by_date.setdefault(date, []).append(row)
+
+    dates_written: list[str] = []
+    for date in sorted(messages_by_date):
+        day_messages = messages_by_date[date]
+        conversation_ids = {row["conversation_id"] for row in day_messages}
+        day_conversations = [row for row in capture.conversations if row["id"] in conversation_ids]
+        merge_day_capture(
+            paths,
+            date=date,
+            account=account,
+            auth=capture.auth,
+            users=capture.users,
+            conversations=day_conversations,
+            messages=day_messages,
+        )
+        dates_written.append(date)
+
+    observed_ts = max_ts([str(row["message"]["ts"]) for row in capture.messages])
+    cursor_after = cursor_before.cursor_value if cursor_before is not None else None
+    cursor_updated = False
+
+    if observed_ts is not None and (
+        cursor_after is None or ts_sort_key(observed_ts) > ts_sort_key(cursor_after)
+    ):
+        updated_cursor = set_connector_cursor(
+            paths,
+            source="slack",
+            account=account,
+            cursor_key=SLACK_CURSOR_KEY,
+            cursor_value=observed_ts,
+        )
+        cursor_after = updated_cursor.cursor_value
+        cursor_updated = True
+
+    return SlackIncrementalCaptureResult(
+        account=account,
+        oldest=oldest,
+        latest=latest,
+        cursor_before=cursor_before.cursor_value if cursor_before is not None else None,
+        cursor_after=cursor_after,
+        dates_written=dates_written,
+        stored_messages=capture.stats["stored_messages"],
+        cursor_updated=cursor_updated,
     )
 
 

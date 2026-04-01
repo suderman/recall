@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import sqlalchemy as sa
-from sqlalchemy import Engine
+from sqlalchemy import Connection, Engine
 
 from recall.storage.paths import RecallPaths
 
@@ -92,6 +92,12 @@ def sqlite_url(database_path: Path) -> str:
 
 def create_engine(paths: RecallPaths) -> Engine:
     return sa.create_engine(sqlite_url(paths.database), future=True)
+
+
+def connect(paths: RecallPaths) -> Connection:
+    engine = create_engine(paths)
+    metadata.create_all(engine)
+    return engine.connect()
 
 
 def initialize_database(paths: RecallPaths) -> Engine:

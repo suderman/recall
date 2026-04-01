@@ -3,12 +3,18 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+from decimal import Decimal
 from pathlib import Path
 
-from recall.connectors.slack.capture import capture_slack_day
+from recall.connectors.slack.capture import (
+    SLACK_CURSOR_KEY,
+    capture_slack_day,
+    capture_slack_incremental,
+)
 from recall.connectors.slack.entities import sync_slack_entities
 from recall.connectors.slack.normalize import normalize_slack_day
 from recall.storage.paths import RecallPaths
+from recall.storage.state import get_connector_cursor
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "slack_capture"
 
@@ -40,9 +46,9 @@ class FakeSlackClient:
         ]
 
     def fetch_history(
-        self, channel_id: str, *, oldest: str, latest: str
+        self, channel_id: str, *, oldest: str, latest: str, inclusive: bool = True
     ) -> list[dict[str, object]]:
-        del oldest, latest
+        del oldest, latest, inclusive
         if channel_id == "C123":
             return [
                 {
@@ -78,6 +84,86 @@ class FakeSlackClient:
                 },
             ]
         raise AssertionError(f"Unexpected thread lookup: {channel_id} {ts}")
+
+
+class IncrementalSlackClient:
+    def __init__(self) -> None:
+        self.history = {
+            "C123": [
+                {
+                    "ts": "1774976467.000100",
+                    "user": "USELF",
+                    "text": "Hey <@UPEER> review <https://example.com|this>",
+                    "reply_count": 1,
+                },
+                {
+                    "ts": "1775062867.000100",
+                    "user": "USELF",
+                    "text": "Daily follow-up",
+                },
+            ],
+            "D456": [
+                {"ts": "1774980000.000300", "user": "UPEER", "text": "Lunch?"},
+                {"ts": "1775066400.000300", "user": "UPEER", "text": "Tomorrow works"},
+            ],
+        }
+        self.replies = {
+            ("C123", "1774976467.000100"): [
+                {
+                    "ts": "1774976467.000100",
+                    "user": "USELF",
+                    "text": "Hey <@UPEER> review <https://example.com|this>",
+                },
+                {
+                    "ts": "1774977467.000200",
+                    "thread_ts": "1774976467.000100",
+                    "user": "UPEER",
+                    "text": "Looks good",
+                },
+            ]
+        }
+
+    def auth_test(self) -> dict[str, str]:
+        return {
+            "team": "Example Workspace",
+            "team_id": "T123",
+            "user": "jon",
+            "user_id": "USELF",
+        }
+
+    def list_users(self) -> list[dict[str, object]]:
+        return [
+            {"id": "USELF", "name": "jon", "real_name": "Jon", "profile": {"display_name": "Jon"}},
+            {
+                "id": "UPEER",
+                "name": "ariel",
+                "real_name": "Ariel",
+                "profile": {"display_name": "Ariel"},
+            },
+        ]
+
+    def list_conversations(self, *, include_archived: bool = True) -> list[dict[str, object]]:
+        del include_archived
+        return [
+            {"id": "C123", "name": "webteam", "is_archived": False, "is_private": False},
+            {"id": "D456", "is_im": True, "user": "UPEER", "is_archived": False},
+        ]
+
+    def fetch_history(
+        self, channel_id: str, *, oldest: str, latest: str, inclusive: bool = True
+    ) -> list[dict[str, object]]:
+        lower = Decimal(oldest)
+        upper = Decimal(latest)
+        rows: list[dict[str, object]] = []
+        for message in self.history.get(channel_id, []):
+            ts = Decimal(str(message["ts"]))
+            is_after = ts >= lower if inclusive else ts > lower
+            if is_after and ts <= upper:
+                rows.append(dict(message))
+        return rows
+
+    def fetch_replies(self, channel_id: str, *, ts: str) -> list[dict[str, object]]:
+        return [dict(row) for row in self.replies.get((channel_id, ts), [])]
 
 
 def copy_fixture_capture(tmp_path: Path) -> RecallPaths:
@@ -206,3 +292,128 @@ def test_normalize_slack_day_is_replayable_from_same_raw_capture(tmp_path) -> No
 
     assert first_path == second_path
     assert first_output == second_output
+
+
+def test_incremental_capture_without_cursor_uses_explicit_since(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+
+    result = capture_slack_incremental(
+        paths,
+        client=IncrementalSlackClient(),
+        account="work",
+        cursor_before=None,
+        since="2026-03-31T00:00:00Z",
+        until="2026-03-31T23:59:59Z",
+    )
+
+    assert result.cursor_before is None
+    assert result.cursor_after == "1774980000.000300"
+    assert result.dates_written == ["2026-03-31"]
+
+    cursor = get_connector_cursor(
+        paths,
+        source="slack",
+        account="work",
+        cursor_key=SLACK_CURSOR_KEY,
+    )
+    assert cursor is not None
+    assert cursor.cursor_value == "1774980000.000300"
+
+    raw_dir = paths.raw_capture_dir("slack", "2026-03-31")
+    message_count = len((raw_dir / "messages.jsonl").read_text(encoding="utf-8").splitlines())
+    assert message_count == 3
+
+
+def test_incremental_capture_with_existing_cursor_appends_newer_messages(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    client = IncrementalSlackClient()
+
+    first = capture_slack_incremental(
+        paths,
+        client=client,
+        account="work",
+        cursor_before=None,
+        since="2026-03-31T00:00:00Z",
+        until="2026-03-31T23:59:59Z",
+    )
+    cursor = get_connector_cursor(
+        paths,
+        source="slack",
+        account="work",
+        cursor_key=SLACK_CURSOR_KEY,
+    )
+
+    second = capture_slack_incremental(
+        paths,
+        client=client,
+        account="work",
+        cursor_before=cursor,
+        since=None,
+        until="2026-04-01T23:59:59Z",
+    )
+
+    assert first.cursor_after == "1774980000.000300"
+    assert second.cursor_before == "1774980000.000300"
+    assert second.cursor_after == "1775066400.000300"
+    assert second.dates_written == ["2026-04-01"]
+
+    second_day_dir = paths.raw_capture_dir("slack", "2026-04-01")
+    message_count = len(
+        (second_day_dir / "messages.jsonl").read_text(encoding="utf-8").splitlines()
+    )
+    assert message_count == 2
+
+
+def test_incremental_capture_safe_rerun_does_not_duplicate_messages(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    client = IncrementalSlackClient()
+
+    capture_slack_incremental(
+        paths,
+        client=client,
+        account="work",
+        cursor_before=None,
+        since="2026-03-31T00:00:00Z",
+        until="2026-03-31T23:59:59Z",
+    )
+    cursor = get_connector_cursor(
+        paths,
+        source="slack",
+        account="work",
+        cursor_key=SLACK_CURSOR_KEY,
+    )
+    rerun = capture_slack_incremental(
+        paths,
+        client=client,
+        account="work",
+        cursor_before=cursor,
+        since=None,
+        until="2026-03-31T23:59:59Z",
+    )
+
+    assert rerun.stored_messages == 0
+    assert rerun.cursor_updated is False
+    assert rerun.dates_written == []
+
+    day_dir = paths.raw_capture_dir("slack", "2026-03-31")
+    message_count = len((day_dir / "messages.jsonl").read_text(encoding="utf-8").splitlines())
+    assert message_count == 3
+
+
+def test_day_bounded_capture_does_not_require_or_update_cursor_state(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+
+    capture_slack_day(
+        paths,
+        client=FakeSlackClient(),
+        date="2026-03-31",
+        account="work",
+    )
+
+    cursor = get_connector_cursor(
+        paths,
+        source="slack",
+        account="work",
+        cursor_key=SLACK_CURSOR_KEY,
+    )
+    assert cursor is None

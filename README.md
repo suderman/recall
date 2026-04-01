@@ -306,8 +306,10 @@ Capture and normalize one day of Slack data:
 
 ```bash
 recall capture slack --date 2026-03-31
+recall capture slack --incremental --since 2026-03-31T00:00:00Z
 recall normalize slack --date 2026-03-31
 recall entities sync slack --date 2026-03-31
+recall state show slack
 recall events show --date 2026-03-31
 ```
 

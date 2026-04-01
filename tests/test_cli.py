@@ -119,3 +119,11 @@ def test_entities_sync_slack_persists_identity_rows(tmp_path) -> None:
         identity_count = connection.execute("select count(*) from identities").fetchone()[0]
 
     assert identity_count == 3
+
+
+def test_state_show_slack_reports_empty_state(tmp_path) -> None:
+    result = runner.invoke(app, ["state", "show", "slack", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "source=slack" in result.stdout
+    assert "cursor_state=empty" in result.stdout
