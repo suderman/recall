@@ -307,6 +307,7 @@ Capture and normalize one day of Slack data:
 ```bash
 recall capture slack --date 2026-03-31
 recall normalize slack --date 2026-03-31
+recall events show --date 2026-03-31
 ```
 
 Run the test suite:

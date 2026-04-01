@@ -28,6 +28,17 @@ def write_jsonl(
             handle.write("\n")
 
 
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                records.append(json.loads(line))
+
+    return records
+
+
 def write_normalized_events(
     paths: RecallPaths,
     date: str,

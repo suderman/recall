@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 
 from recall import __version__
+from recall.cli.events import show_events
 from recall.config import resolve_root
 from recall.connectors.slack.cli import capture_slack, normalize_slack
 from recall.storage.db import initialize_database
@@ -13,9 +14,11 @@ from recall.storage.paths import RecallPaths
 app = typer.Typer(help="Recall command-line interface.", no_args_is_help=True)
 capture_app = typer.Typer(help="Capture raw evidence from source systems.")
 normalize_app = typer.Typer(help="Normalize captured evidence into daily events.")
+events_app = typer.Typer(help="Inspect normalized events.")
 
 app.add_typer(capture_app, name="capture")
 app.add_typer(normalize_app, name="normalize")
+app.add_typer(events_app, name="events")
 
 
 def _load_paths(root: Path | None) -> RecallPaths:
@@ -78,6 +81,7 @@ def version() -> None:
 
 capture_app.command("slack")(capture_slack)
 normalize_app.command("slack")(normalize_slack)
+events_app.command("show")(show_events)
 
 
 def main() -> None:
