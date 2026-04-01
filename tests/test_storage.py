@@ -15,4 +15,11 @@ def test_initialize_database_creates_core_tables(tmp_path) -> None:
         rows = connection.execute("select name from sqlite_master where type = 'table'").fetchall()
 
     table_names = {name for (name,) in rows}
-    assert {"persons", "identities", "aliases", "resolutions", "connector_cursors"} <= table_names
+    assert {
+        "persons",
+        "identities",
+        "aliases",
+        "identity_aliases",
+        "resolutions",
+        "connector_cursors",
+    } <= table_names

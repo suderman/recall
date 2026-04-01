@@ -1,3 +1,4 @@
 {"captured_via":"history","conversation_id":"C123","conversation_kind":"public_channel","conversation_label":"#webteam","message":{"reply_count":1,"text":"Hey <@UPEER> review <https://example.com|this>","ts":"1774976467.000100","user":"USELF"},"parent_ts":null}
+{"captured_via":"history","conversation_id":"C123","conversation_kind":"public_channel","conversation_label":"#webteam","message":{"bot_id":"BHELPER","text":"Reminder sent","ts":"1774977000.000150","username":"Helper Bot"},"parent_ts":null}
 {"captured_via":"thread","conversation_id":"C123","conversation_kind":"public_channel","conversation_label":"#webteam","message":{"text":"Looks good","thread_ts":"1774976467.000100","ts":"1774977467.000200","user":"UPEER"},"parent_ts":"1774976467.000100"}
 {"captured_via":"history","conversation_id":"D456","conversation_kind":"im","conversation_label":"DM:Ariel","message":{"text":"Lunch?","ts":"1774980000.000300","user":"UPEER"},"parent_ts":null}

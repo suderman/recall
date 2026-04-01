@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from recall.normalize.events import NormalizedEvent
+from recall.normalize.events import NormalizedEvent, RawReference
 from recall.storage.jsonl import write_normalized_events
 from recall.storage.paths import RecallPaths
 
@@ -16,7 +16,11 @@ def test_write_normalized_events_uses_daily_jsonl_partition(tmp_path) -> None:
         date="2026-03-31",
         kind="message",
         text="hello world",
-        raw_ref="data/raw/slack/2026-03-31/messages.json",
+        raw_ref=RawReference(
+            source="slack",
+            path="data/raw/slack/2026-03-31/messages.jsonl",
+            locator={"channel": "C123", "ts": "1774976467.000100"},
+        ),
     )
 
     destination = write_normalized_events(paths, event.date, [event])
@@ -24,4 +28,6 @@ def test_write_normalized_events_uses_daily_jsonl_partition(tmp_path) -> None:
     assert destination == tmp_path / "data" / "normalized" / "2026" / "2026-03-31.jsonl"
     lines = destination.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
-    assert json.loads(lines[0])["event_id"] == "evt_slack_1"
+    record = json.loads(lines[0])
+    assert record["event_id"] == "evt_slack_1"
+    assert record["raw_ref"]["locator"]["channel"] == "C123"

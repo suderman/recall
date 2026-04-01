@@ -18,12 +18,14 @@ def _paths_for(root: Path | None) -> RecallPaths:
 def _render_event(event: dict[str, Any]) -> list[str]:
     conversation_label = event.get("conversation_label") or "-"
     participants = ",".join(event.get("participant_identity_ids", [])) or "-"
+    raw_ref = event.get("raw_ref")
+    raw_ref_text = json.dumps(raw_ref, ensure_ascii=True, sort_keys=True) if raw_ref else "-"
 
     lines = [
         f"- {event['timestamp']} {event['source']}:{event['kind']} {conversation_label}",
         f"  text={event.get('text') or ''}",
         f"  sender={event.get('sender_identity_id') or '-'} participants={participants}",
-        f"  raw_ref={event.get('raw_ref') or '-'}",
+        f"  raw_ref={raw_ref_text}",
     ]
     return lines
 

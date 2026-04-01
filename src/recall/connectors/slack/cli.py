@@ -10,6 +10,7 @@ from recall.config import resolve_root
 from recall.connectors.slack.api import SlackApiClient
 from recall.connectors.slack.capture import capture_slack_day, raw_capture_paths
 from recall.connectors.slack.config import load_slack_config, slack_config_path
+from recall.connectors.slack.entities import sync_slack_entities as sync_slack_entities_for_date
 from recall.connectors.slack.normalize import normalize_slack_day
 from recall.storage.paths import RecallPaths
 
@@ -87,3 +88,26 @@ def normalize_slack(
     normalized_path = normalize_slack_day(paths, date=date)
     typer.echo(f"Normalized Slack events for {date}")
     typer.echo(f"events={normalized_path}")
+
+
+def sync_slack_entities(
+    date: str = typer.Option(
+        ..., "--date", help="Date to sync identities from in YYYY-MM-DD format."
+    ),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+) -> None:
+    """Sync Slack identities and aliases into SQLite entity storage."""
+
+    paths = _paths_for(root)
+    paths.ensure_directories()
+    result = sync_slack_entities_for_date(paths, date=date)
+    typer.echo(f"Synced Slack entities for {date}")
+    typer.echo(f"identities={result.identities_synced}")
+    typer.echo(f"identity_aliases={result.aliases_synced}")

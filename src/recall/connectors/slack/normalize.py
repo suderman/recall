@@ -14,7 +14,7 @@ from recall.connectors.slack.capture import (
     parse_date,
     raw_capture_paths,
 )
-from recall.normalize.events import NormalizedEvent
+from recall.normalize.events import NormalizedEvent, RawReference
 from recall.storage.jsonl import write_normalized_events
 from recall.storage.paths import RecallPaths
 
@@ -67,6 +67,13 @@ def slack_identity_id(message: dict[str, Any]) -> str | None:
 
 def link_values(text: str) -> list[str]:
     return URL_PATTERN.findall(text)
+
+
+def event_url(text: str) -> str | None:
+    links = link_values(text)
+    if len(links) == 1:
+        return links[0]
+    return None
 
 
 def stable_event_id(account: str, conversation_id: str, ts: str) -> str:
@@ -151,9 +158,16 @@ def normalize_slack_day(paths: RecallPaths, *, date: str) -> Path:
             ) or conversation_participants.get(row["conversation_id"], [])
 
         raw_relative = paths.relative_to_root(messages_path)
-        raw_ref = f"{raw_relative}:{row['_line_number']}"
+        raw_ref = RawReference(
+            source="slack",
+            path=raw_relative,
+            locator={
+                "channel": row["conversation_id"],
+                "ts": str(message["ts"]),
+            },
+        )
         sender_identity_id = slack_identity_id(message)
-        tags = ["chat", "slack", conversation["kind"]]
+        tags = ["message"]
 
         events.append(
             NormalizedEvent(
@@ -169,17 +183,10 @@ def normalize_slack_day(paths: RecallPaths, *, date: str) -> Path:
                 sender_identity_id=sender_identity_id,
                 participant_identity_ids=participant_identity_ids,
                 text=text,
-                tags=tags,
-                links=link_values(text),
+                url=event_url(text),
                 raw_ref=raw_ref,
-                raw={
-                    "ts": message.get("ts"),
-                    "thread_ts": message.get("thread_ts"),
-                    "user": message.get("user"),
-                    "bot_id": message.get("bot_id"),
-                    "subtype": message.get("subtype"),
-                    "captured_via": row.get("captured_via"),
-                },
+                raw_fragment=None,
+                tags=tags,
             )
         )
 

@@ -47,6 +47,22 @@ aliases = sa.Table(
     sa.Column("created_at", sa.Text, nullable=False),
 )
 
+identity_aliases = sa.Table(
+    "identity_aliases",
+    metadata,
+    sa.Column("identity_alias_id", sa.Text, primary_key=True),
+    sa.Column("identity_id", sa.Text, sa.ForeignKey("identities.identity_id"), nullable=False),
+    sa.Column("value", sa.Text, nullable=False),
+    sa.Column("source", sa.Text, nullable=False),
+    sa.Column("created_at", sa.Text, nullable=False),
+    sa.UniqueConstraint(
+        "identity_id",
+        "value",
+        "source",
+        name="uq_identity_alias_identity_value_source",
+    ),
+)
+
 resolutions = sa.Table(
     "resolutions",
     metadata,
