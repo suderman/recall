@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import sqlalchemy as sa
+from sqlalchemy import Engine
+
+from recall.storage.paths import RecallPaths
+
+
+metadata = sa.MetaData()
+
+persons = sa.Table(
+    "persons",
+    metadata,
+    sa.Column("person_id", sa.Text, primary_key=True),
+    sa.Column("display_name", sa.Text, nullable=False),
+    sa.Column("sort_name", sa.Text),
+    sa.Column("notes", sa.Text, nullable=False, server_default=""),
+    sa.Column("tags_json", sa.Text, nullable=False, server_default="[]"),
+    sa.Column("created_at", sa.Text, nullable=False),
+)
+
+identities = sa.Table(
+    "identities",
+    metadata,
+    sa.Column("identity_id", sa.Text, primary_key=True),
+    sa.Column("person_id", sa.Text, sa.ForeignKey("persons.person_id")),
+    sa.Column("source", sa.Text, nullable=False),
+    sa.Column("kind", sa.Text, nullable=False),
+    sa.Column("value", sa.Text, nullable=False),
+    sa.Column("label", sa.Text),
+    sa.Column("is_primary", sa.Boolean, nullable=False, server_default=sa.false()),
+    sa.Column("status", sa.Text, nullable=False, server_default="active"),
+    sa.Column("valid_from", sa.Text),
+    sa.Column("valid_to", sa.Text),
+    sa.Column("created_at", sa.Text, nullable=False),
+    sa.UniqueConstraint("source", "kind", "value", name="uq_identity_source_kind_value"),
+)
+
+aliases = sa.Table(
+    "aliases",
+    metadata,
+    sa.Column("alias_id", sa.Text, primary_key=True),
+    sa.Column("person_id", sa.Text, sa.ForeignKey("persons.person_id"), nullable=False),
+    sa.Column("value", sa.Text, nullable=False),
+    sa.Column("source", sa.Text, nullable=False),
+    sa.Column("created_at", sa.Text, nullable=False),
+)
+
+resolutions = sa.Table(
+    "resolutions",
+    metadata,
+    sa.Column("resolution_id", sa.Text, primary_key=True),
+    sa.Column("identity_id", sa.Text, sa.ForeignKey("identities.identity_id"), nullable=False),
+    sa.Column("person_id", sa.Text, sa.ForeignKey("persons.person_id"), nullable=False),
+    sa.Column("confidence", sa.Text, nullable=False),
+    sa.Column("method", sa.Text, nullable=False),
+    sa.Column("evidence_json", sa.Text, nullable=False, server_default="[]"),
+    sa.Column("created_at", sa.Text, nullable=False),
+)
+
+connector_cursors = sa.Table(
+    "connector_cursors",
+    metadata,
+    sa.Column("source", sa.Text, primary_key=True),
+    sa.Column("account", sa.Text, primary_key=True),
+    sa.Column("cursor_key", sa.Text, primary_key=True),
+    sa.Column("cursor_value", sa.Text, nullable=False),
+    sa.Column("updated_at", sa.Text, nullable=False),
+)
+
+
+def sqlite_url(database_path: Path) -> str:
+    return f"sqlite:///{database_path}"
+
+
+def create_engine(paths: RecallPaths) -> Engine:
+    return sa.create_engine(sqlite_url(paths.database), future=True)
+
+
+def initialize_database(paths: RecallPaths) -> Engine:
+    paths.ensure_directories()
+    engine = create_engine(paths)
+    metadata.create_all(engine)
+    return engine

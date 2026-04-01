@@ -268,6 +268,42 @@ Recall isn't:
 - add journal synthesis over Slack + email + calendar
 - design backfill/import conventions before the project sprawls
 
+## Development
+
+The initial implementation stack is:
+
+- Python
+- Typer for CLI commands
+- FastAPI for always-on webhook or admin edges
+- SQLAlchemy Core + SQLite for operational state and entity tables
+- daily JSONL files as the canonical normalized event store
+
+If you use Nix:
+
+```bash
+nix develop
+```
+
+If you use a local Python environment:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -e '.[dev]'
+```
+
+Initialize the workspace and state database:
+
+```bash
+recall init
+```
+
+Run the test suite:
+
+```bash
+python -m pytest
+```
+
 ## Long-term goals
 
 - full life history archive
