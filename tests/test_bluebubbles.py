@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from recall.connectors.bluebubbles.capture import append_bluebubbles_event
+from recall.connectors.bluebubbles.config import BlueBubblesSourceConfig
+from recall.connectors.bluebubbles.entities import sync_bluebubbles_entities
+from recall.connectors.bluebubbles.normalize import normalize_bluebubbles_day
+from recall.connectors.bluebubbles.webhook import create_bluebubbles_webhook_app
+from recall.storage.paths import RecallPaths
+
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "bluebubbles" / "new_message.json"
+
+
+def load_fixture() -> dict:
+    return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+
+def test_bluebubbles_webhook_captures_raw_event(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    config = BlueBubblesSourceConfig(account="personal", webhook_token="secret")
+    app = create_bluebubbles_webhook_app(paths, config)
+    client = TestClient(app)
+
+    response = client.post("/bluebubbles/webhook?token=secret", json=load_fixture())
+
+    assert response.status_code == 200
+    events_path = paths.raw_capture_dir("bluebubbles", response.json()["date"]) / "events.jsonl"
+    assert events_path.exists()
+    row = json.loads(events_path.read_text(encoding="utf-8").splitlines()[0])
+    assert row["source"] == "bluebubbles"
+    assert row["account"] == "personal"
+    assert row["event_type"] == "new-message"
+    assert row["payload"]["data"]["guid"] == load_fixture()["data"]["guid"]
+
+
+def test_bluebubbles_webhook_rejects_invalid_token(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    config = BlueBubblesSourceConfig(account="personal", webhook_token="secret")
+    app = create_bluebubbles_webhook_app(paths, config)
+    client = TestClient(app)
+
+    response = client.post("/bluebubbles/webhook?token=wrong", json=load_fixture())
+
+    assert response.status_code == 401
+
+
+def test_normalize_bluebubbles_day_writes_events_and_artifacts(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    append_bluebubbles_event(
+        paths,
+        account="personal",
+        payload=load_fixture(),
+        received_at="2026-03-31T21:31:07Z",
+    )
+
+    event_path, artifact_path = normalize_bluebubbles_day(paths, date="2026-03-31")
+
+    event_record = json.loads(event_path.read_text(encoding="utf-8").splitlines()[0])
+    artifact_record = json.loads(artifact_path.read_text(encoding="utf-8").splitlines()[0])
+
+    assert event_record["source"] == "bluebubbles"
+    assert event_record["conversation_id"] == "iMessage;+15551234567"
+    assert event_record["conversation_label"] == "Ariel"
+    assert event_record["text"] == "Photo from bub https://example.com/story"
+    assert event_record["source_urls"] == ["https://example.com/story"]
+    assert len(event_record["artifact_ids"]) == 1
+    assert event_record["sender_identity_id"].startswith("ident_bluebubbles_phone_")
+    assert len(event_record["participant_identity_ids"]) == 2
+    assert event_record["raw_ref"]["path"] == "data/raw/bluebubbles/2026-03-31/events.jsonl"
+
+    assert artifact_record["source"] == "bluebubbles"
+    assert artifact_record["source_object_id"] == "at_001"
+    assert artifact_record["filename"] == "IMG_1001.jpeg"
+    assert artifact_record["mime_type"] == "image/jpeg"
+    assert artifact_record["size_bytes"] == 482193
+    assert artifact_record["download_status"] == "not_requested"
+    assert artifact_record["event_ids"] == [event_record["event_id"]]
+    assert artifact_record["remote_locators"] == [
+        {
+            "kind": "attachment_path",
+            "value": "/Users/jon/Library/Messages/Attachments/ab/cd/IMG_1001.jpeg",
+        },
+        {
+            "kind": "transferName",
+            "value": "IMG_1001.jpeg",
+        },
+    ]
+
+
+def test_sync_bluebubbles_entities_persists_handles_and_aliases(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    append_bluebubbles_event(
+        paths,
+        account="personal",
+        payload=load_fixture(),
+        received_at="2026-03-31T21:31:07Z",
+    )
+
+    result = sync_bluebubbles_entities(paths, date="2026-03-31")
+
+    assert result.identities_synced == 2
+    assert result.aliases_synced == 2
+
+    with sqlite3.connect(paths.database) as connection:
+        identities = connection.execute(
+            "select source, kind, value, person_id from identities order by kind, value"
+        ).fetchall()
+        aliases = connection.execute(
+            (
+                "select identity_id, value, source from identity_aliases "
+                "order by identity_id, value, source"
+            )
+        ).fetchall()
+
+    assert identities == [
+        ("bluebubbles", "email", "jon@icloud.com", None),
+        ("bluebubbles", "phone", "+15551234567", None),
+    ]
+    assert len(aliases) == 2
+    assert {value for _, value, _ in aliases} == {"Ariel"}
+    assert {source for _, _, source in aliases} == {"bluebubbles_chat_display_name"}
+
+
+def test_sync_bluebubbles_entities_is_idempotent(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    append_bluebubbles_event(
+        paths,
+        account="personal",
+        payload=load_fixture(),
+        received_at="2026-03-31T21:31:07Z",
+    )
+
+    first = sync_bluebubbles_entities(paths, date="2026-03-31")
+    second = sync_bluebubbles_entities(paths, date="2026-03-31")
+
+    assert first.identities_synced == second.identities_synced == 2
+    assert first.aliases_synced == second.aliases_synced == 2
+
+    with sqlite3.connect(paths.database) as connection:
+        identity_count = connection.execute("select count(*) from identities").fetchone()[0]
+        alias_count = connection.execute("select count(*) from identity_aliases").fetchone()[0]
+
+    assert identity_count == 2
+    assert alias_count == 2

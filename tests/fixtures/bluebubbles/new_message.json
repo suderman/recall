@@ -1,0 +1,23 @@
+{
+  "type": "new-message",
+  "data": {
+    "guid": "p:0/8A5C4A20-3EFA-4AFB-9B41-8D0370F6D2D4",
+    "dateCreated": 1774978267000,
+    "text": "Photo from bub https://example.com/story",
+    "isFromMe": false,
+    "chatGuid": "iMessage;+15551234567",
+    "chatDisplayName": "Ariel",
+    "handle": "+15551234567",
+    "participants": ["+15551234567", "jon@icloud.com"],
+    "attachments": [
+      {
+        "guid": "at_001",
+        "filename": "IMG_1001.jpeg",
+        "mimeType": "image/jpeg",
+        "path": "/Users/jon/Library/Messages/Attachments/ab/cd/IMG_1001.jpeg",
+        "transferName": "IMG_1001.jpeg",
+        "totalBytes": 482193
+      }
+    ]
+  }
+}

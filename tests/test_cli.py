@@ -330,6 +330,36 @@ def test_normalize_slack_reports_next_steps(tmp_path) -> None:
     assert "recall artifacts show --date 2026-03-31" in result.stdout
 
 
+def test_capture_bluebubbles_serve_reports_webhook_url_hint(tmp_path, monkeypatch) -> None:
+    config_dir = tmp_path / "config" / "sources"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "bluebubbles.toml").write_text(
+        (
+            'account = "personal"\n'
+            'webhook_bind_host = "0.0.0.0"\n'
+            "webhook_port = 8042\n"
+            'webhook_token = "secret"\n'
+        ),
+        encoding="utf-8",
+    )
+
+    import recall.connectors.bluebubbles.cli as bluebubbles_cli
+
+    def fake_run(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("stop after startup output")
+
+    monkeypatch.setattr(bluebubbles_cli.uvicorn, "run", fake_run)
+
+    result = runner.invoke(app, ["capture", "bluebubbles", "serve", "--root", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert (
+        "webhook_url_hint=use http://<recall-host-lan-ip>:8042/bluebubbles/webhook?token=secret"
+        in result.stdout
+    )
+
+
 def test_entities_sync_slack_persists_identity_rows(tmp_path) -> None:
     paths = _copy_slack_fixture_capture(tmp_path)
 

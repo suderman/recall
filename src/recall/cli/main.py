@@ -8,6 +8,11 @@ from recall import __version__
 from recall.cli.artifacts import download_slack_artifact_bytes, show_artifacts
 from recall.cli.events import show_events
 from recall.config import resolve_root
+from recall.connectors.bluebubbles.cli import (
+    normalize_bluebubbles,
+    serve_bluebubbles,
+    sync_bluebubbles_entities,
+)
 from recall.connectors.slack.cli import (
     capture_slack,
     normalize_slack,
@@ -27,6 +32,7 @@ entities_app = typer.Typer(help="Manage identity and entity storage.")
 entities_sync_app = typer.Typer(help="Sync source identities into SQLite.")
 state_app = typer.Typer(help="Inspect operational connector state.")
 state_show_app = typer.Typer(help="Show stored connector state.")
+bluebubbles_capture_app = typer.Typer(help="BlueBubbles capture commands.")
 
 app.add_typer(capture_app, name="capture")
 app.add_typer(normalize_app, name="normalize")
@@ -37,6 +43,7 @@ app.add_typer(state_app, name="state")
 entities_app.add_typer(entities_sync_app, name="sync")
 state_app.add_typer(state_show_app, name="show")
 artifacts_app.add_typer(artifacts_download_app, name="download")
+capture_app.add_typer(bluebubbles_capture_app, name="bluebubbles")
 
 
 def _load_paths(root: Path | None) -> RecallPaths:
@@ -99,11 +106,14 @@ def version() -> None:
 
 
 capture_app.command("slack")(capture_slack)
+bluebubbles_capture_app.command("serve")(serve_bluebubbles)
 normalize_app.command("slack")(normalize_slack)
+normalize_app.command("bluebubbles")(normalize_bluebubbles)
 events_app.command("show")(show_events)
 artifacts_app.command("show")(show_artifacts)
 artifacts_download_app.command("slack")(download_slack_artifact_bytes)
 entities_sync_app.command("slack")(sync_slack_entities)
+entities_sync_app.command("bluebubbles")(sync_bluebubbles_entities)
 state_show_app.command("slack")(show_slack_state)
 
 

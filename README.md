@@ -303,6 +303,11 @@ Configure Slack capture by copying `config/sources/slack.toml.example` to
 variable. Keep `artifact_download_policy = "metadata-only"` unless you
 explicitly want Recall to download source-native Slack file objects.
 
+Configure BlueBubbles capture by copying `config/sources/bluebubbles.toml.example`
+to `config/sources/bluebubbles.toml`, then point the BlueBubbles server at the
+Recall webhook URL on your LAN. Use the Recall host's reachable LAN IP, not
+`0.0.0.0`, for example `http://10.1.0.6:8042/bluebubbles/webhook?token=...`.
+
 Capture and normalize one day of Slack data:
 
 ```bash
@@ -313,6 +318,9 @@ recall entities sync slack --date 2026-03-31
 recall artifacts show --date 2026-03-31
 recall artifacts download slack --date 2026-03-31 --dry-run
 recall artifacts download slack --date 2026-03-31
+recall capture bluebubbles serve
+recall normalize bluebubbles --date 2026-03-31
+recall entities sync bluebubbles --date 2026-03-31
 recall state show slack
 recall events show --date 2026-03-31
 ```
