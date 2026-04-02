@@ -346,6 +346,10 @@ A canonical human being.
 ### 9.2 Identity
 A source-specific handle, account, email, phone number, user ID, or address.
 
+An identity value is not guaranteed to belong to the same person forever.
+Some identities are effectively stable, but others can be reassigned or change
+hands over time.
+
 Examples:
 - Slack user ID
 - email address
@@ -360,6 +364,14 @@ A textual label or display name associated with a person.
 ### 9.4 Resolution
 Evidence that a given identity belongs to a person.
 
+Resolutions should be able to carry temporal validity such as `valid_from` and
+`valid_to` so Recall can answer "which person did this identity refer to at the
+time of the event?" rather than assuming a timeless mapping.
+
+This matters especially for email and phone numbers. Example: a role address may
+be passed between employees, or a family email address may belong to one person
+for older mail and a different person later.
+
 ### 9.5 Unresolved identities
 These are valid and expected. Do not force weak matches.
 
@@ -367,6 +379,11 @@ Important rule:
 **events should normalize identities first, not people.**
 
 People resolution can improve later without re-ingesting raw events.
+
+When an event is linked to a person, Recall should choose the matching
+resolution whose validity window contains the event timestamp. If no dated
+resolution matches confidently, the identity should remain unresolved rather
+than being forced onto the wrong person.
 
 ## 10. Connector categories
 
@@ -424,6 +441,8 @@ These should import archives into raw storage and then normalize from there.
 ### 11.4 Email
 - query notmuch directly at synthesis or normalization time
 - raw capture not required initially
+- treat email addresses as identities, not permanent person bindings
+- support dated/manual resolution rules for addresses that change hands over time
 
 ### 11.5 Calendar
 - query khal / local calendar data directly at synthesis or normalization time

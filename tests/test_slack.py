@@ -33,12 +33,17 @@ class FakeSlackClient:
 
     def list_users(self) -> list[dict[str, object]]:
         return [
-            {"id": "USELF", "name": "jon", "real_name": "Jon", "profile": {"display_name": "Jon"}},
+            {
+                "id": "USELF",
+                "name": "jon",
+                "real_name": "Jon",
+                "profile": {"display_name": "Jon", "email": "jon@example.com"},
+            },
             {
                 "id": "UPEER",
                 "name": "ariel",
                 "real_name": "Ariel",
-                "profile": {"display_name": "Ariel"},
+                "profile": {"display_name": "Ariel", "email": "ariel@example.com"},
             },
         ]
 
@@ -158,12 +163,17 @@ class IncrementalSlackClient:
 
     def list_users(self) -> list[dict[str, object]]:
         return [
-            {"id": "USELF", "name": "jon", "real_name": "Jon", "profile": {"display_name": "Jon"}},
+            {
+                "id": "USELF",
+                "name": "jon",
+                "real_name": "Jon",
+                "profile": {"display_name": "Jon", "email": "jon@example.com"},
+            },
             {
                 "id": "UPEER",
                 "name": "ariel",
                 "real_name": "Ariel",
-                "profile": {"display_name": "Ariel"},
+                "profile": {"display_name": "Ariel", "email": "ariel@example.com"},
             },
         ]
 
@@ -235,6 +245,7 @@ def test_capture_slack_day_writes_expected_raw_files(tmp_path) -> None:
     metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
     assert metadata["account"] == "work"
     assert metadata["users"]["UPEER"] == "Ariel"
+    assert metadata["user_profiles"]["UPEER"]["email"] == "ariel@example.com"
 
     message_lines = result.messages_path.read_text(encoding="utf-8").splitlines()
     assert len(message_lines) == 4
@@ -326,8 +337,8 @@ def test_sync_slack_entities_persists_identities_and_aliases(tmp_path) -> None:
 
     result = sync_slack_entities(paths, date="2026-03-31")
 
-    assert result.identities_synced == 3
-    assert result.aliases_synced == 2
+    assert result.identities_synced == 5
+    assert result.aliases_synced == 6
 
     with sqlite3.connect(paths.database) as connection:
         identities = connection.execute(
@@ -341,10 +352,32 @@ def test_sync_slack_entities_persists_identities_and_aliases(tmp_path) -> None:
         ("ident_slack_UPEER", "user_id", "UPEER", None),
         ("ident_slack_USELF", "user_id", "USELF", None),
         ("ident_slack_bot_BHELPER", "bot_id", "BHELPER", None),
+        ("ident_slack_email_ariel_at_example_com", "email", "ariel@example.com", None),
+        ("ident_slack_email_jon_at_example_com", "email", "jon@example.com", None),
     ]
     assert aliases == [
         ("ident_slack_UPEER", "Ariel", "slack_user_profile"),
+        (
+            "ident_slack_UPEER",
+            "ariel@example.com",
+            "slack_user_email",
+        ),
         ("ident_slack_USELF", "Jon", "slack_user_profile"),
+        (
+            "ident_slack_USELF",
+            "jon@example.com",
+            "slack_user_email",
+        ),
+        (
+            "ident_slack_email_ariel_at_example_com",
+            "ariel@example.com",
+            "slack_user_email",
+        ),
+        (
+            "ident_slack_email_jon_at_example_com",
+            "jon@example.com",
+            "slack_user_email",
+        ),
     ]
 
 
@@ -354,15 +387,15 @@ def test_sync_slack_entities_is_idempotent(tmp_path) -> None:
     first = sync_slack_entities(paths, date="2026-03-31")
     second = sync_slack_entities(paths, date="2026-03-31")
 
-    assert first.identities_synced == second.identities_synced == 3
-    assert first.aliases_synced == second.aliases_synced == 2
+    assert first.identities_synced == second.identities_synced == 5
+    assert first.aliases_synced == second.aliases_synced == 6
 
     with sqlite3.connect(paths.database) as connection:
         identity_count = connection.execute("select count(*) from identities").fetchone()[0]
         alias_count = connection.execute("select count(*) from identity_aliases").fetchone()[0]
 
-    assert identity_count == 3
-    assert alias_count == 2
+    assert identity_count == 5
+    assert alias_count == 6
 
 
 def test_normalize_slack_day_is_replayable_from_same_raw_capture(tmp_path) -> None:

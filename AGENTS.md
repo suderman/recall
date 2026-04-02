@@ -352,6 +352,10 @@ Example:
 
 An identity is a source-specific handle or address.
 
+The identity value itself should remain stable even when the human owner changes
+over time. In other words, a reused email address or role account should remain
+one identity value with time-sensitive person resolution layered on top.
+
 Example:
 
 ```json
@@ -411,6 +415,8 @@ Example record:
 
 Resolutions record **how** an identity was linked to a person.
 
+They should also be able to record **when** that linkage was valid.
+
 Example:
 
 ```json
@@ -420,6 +426,8 @@ Example:
   "person_id": "person_jon_suderman",
   "confidence": "high",
   "method": "manual",
+  "valid_from": null,
+  "valid_to": null,
   "evidence": [
     "Matched known work email",
     "Observed self-authored Slack messages"
@@ -431,11 +439,23 @@ Example:
 ### Identity resolution rules
 
 - one person can have many identities
-- one identity should usually map to one person
+- one identity should usually map to one person at a given point in time
 - unresolved identities are allowed and should be preserved
 - names alone are not enough to collapse identities
 - keep source-specific identifiers even after normalization
 - identities may become stale, invalid, or reassigned over time
+- event-time resolution matters for reused addresses, phones, and role accounts
+
+Example edge case:
+
+- `suderman@gmail.com` may resolve to one person for older mail and another
+  person after a known handoff date
+- a role address like `support@company.com` may map to different humans across
+  employment periods
+
+In those cases, preserve the identity value and store multiple dated
+resolutions. Event normalization or later enrichment should select the
+resolution whose validity window covers the event timestamp.
 
 ### Matching strategy
 
@@ -444,7 +464,7 @@ Use three levels:
 #### 1. high confidence automatic
 
 - exact previously-known Slack user ID
-- exact previously-known email address
+- exact previously-known email address, subject to date-bounded resolution rules
 - exact previously-known Telegram user ID
 - exact phone number already linked
 

@@ -9,6 +9,8 @@ from typer.testing import CliRunner
 
 import recall.cli.artifacts as artifacts_cli
 from recall.cli.main import app
+from recall.connectors.telegram.entities import sync_telegram_entities
+from recall.entities.storage import upsert_identities
 from recall.normalize.artifacts import NormalizedArtifact, RemoteLocator
 from recall.normalize.events import NormalizedEvent, RawReference
 from recall.storage.jsonl import write_artifact_metadata, write_normalized_events
@@ -443,13 +445,13 @@ def test_entities_sync_slack_persists_identity_rows(tmp_path) -> None:
     )
 
     assert result.exit_code == 0
-    assert "identities=3" in result.stdout
-    assert "identity_aliases=2" in result.stdout
+    assert "identities=5" in result.stdout
+    assert "identity_aliases=6" in result.stdout
 
     with sqlite3.connect(paths.database) as connection:
         identity_count = connection.execute("select count(*) from identities").fetchone()[0]
 
-    assert identity_count == 3
+    assert identity_count == 5
 
 
 def test_normalize_telegram_reports_next_steps(tmp_path) -> None:
@@ -737,13 +739,72 @@ def test_entities_sync_telegram_persists_identity_rows(tmp_path) -> None:
     )
 
     assert result.exit_code == 0
-    assert "identities=3" in result.stdout
-    assert "identity_aliases=6" in result.stdout
+    assert "persons=2" in result.stdout
+    assert "identities=6" in result.stdout
+    assert "person_aliases=5" in result.stdout
+    assert "identity_aliases=9" in result.stdout
+    assert "resolutions=5" in result.stdout
 
     with sqlite3.connect(paths.database) as connection:
+        person_count = connection.execute("select count(*) from persons").fetchone()[0]
         identity_count = connection.execute("select count(*) from identities").fetchone()[0]
+        resolution_count = connection.execute("select count(*) from resolutions").fetchone()[0]
 
-    assert identity_count == 3
+    assert person_count == 2
+    assert identity_count == 6
+    assert resolution_count == 5
+
+
+def test_entities_show_people_and_resolutions(tmp_path) -> None:
+    _copy_telegram_fixture_capture(tmp_path)
+    paths = RecallPaths.from_root(tmp_path)
+    sync_telegram_entities(paths, date="2026-03-31")
+
+    people_result = runner.invoke(app, ["entities", "show", "people", "--root", str(tmp_path)])
+    resolutions_result = runner.invoke(
+        app,
+        ["entities", "show", "resolutions", "--root", str(tmp_path)],
+    )
+
+    assert people_result.exit_code == 0
+    assert "person_telegram_user_42 Ariel Example" in people_result.stdout
+    assert resolutions_result.exit_code == 0
+    assert "ident_telegram_user_42 -> person_telegram_user_42" in resolutions_result.stdout
+
+
+def test_entities_match_applies_cross_source_resolution(tmp_path) -> None:
+    _copy_telegram_fixture_capture(tmp_path)
+    paths = RecallPaths.from_root(tmp_path)
+    sync_telegram_entities(paths, date="2026-03-31")
+    upsert_identities(
+        paths,
+        [
+            {
+                "identity_id": "ident_bluebubbles_plus15551234567",
+                "person_id": None,
+                "source": "bluebubbles",
+                "kind": "phone",
+                "value": "+15551234567",
+                "label": "BlueBubbles phone",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T18:00:00Z",
+            }
+        ],
+    )
+
+    result = runner.invoke(app, ["entities", "match", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "automatic_resolutions=1" in result.stdout
+    with sqlite3.connect(paths.database) as connection:
+        identity = connection.execute(
+            "select person_id from identities where identity_id = 'ident_bluebubbles_plus15551234567'"
+        ).fetchone()
+
+    assert identity == ("person_telegram_user_42",)
 
 
 def test_state_show_slack_reports_empty_state(tmp_path) -> None:

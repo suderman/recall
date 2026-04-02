@@ -1,0 +1,13 @@
+[[identity_resolution]]
+source = "bluebubbles"
+kind = "email"
+value = "jon@example.com"
+person_id = "person_telegram_user_123456"
+confidence = "high"
+method = "manual_override"
+evidence = ["Known personal iMessage email"]
+
+[[person_merge]]
+from_person_id = "person_telegram_user_999999"
+to_person_id = "person_telegram_user_123456"
+reason = "Manual merge after reviewing duplicate people"

@@ -262,12 +262,21 @@ def test_sync_telegram_entities_persists_users_chats_and_aliases(tmp_path) -> No
 
     result = sync_telegram_entities(paths, date="2026-03-31")
 
-    assert result.identities_synced == 3
-    assert result.aliases_synced == 6
+    assert result.persons_synced == 2
+    assert result.identities_synced == 6
+    assert result.person_aliases_synced == 5
+    assert result.aliases_synced == 9
+    assert result.resolutions_synced == 5
 
     with sqlite3.connect(paths.database) as connection:
+        persons = connection.execute(
+            "select person_id, display_name from persons order by person_id"
+        ).fetchall()
         identities = connection.execute(
             "select source, kind, value, person_id from identities order by kind, value"
+        ).fetchall()
+        person_aliases = connection.execute(
+            "select person_id, value, source from aliases order by person_id, value, source"
         ).fetchall()
         aliases = connection.execute(
             (
@@ -275,13 +284,31 @@ def test_sync_telegram_entities_persists_users_chats_and_aliases(tmp_path) -> No
                 "order by identity_id, value, source"
             )
         ).fetchall()
+        resolutions = connection.execute(
+            "select identity_id, person_id, method from resolutions order by identity_id, method"
+        ).fetchall()
 
+    assert persons == [
+        ("person_telegram_user_42", "Ariel Example"),
+        ("person_telegram_user_99", "Jon Suderman"),
+    ]
     assert identities == [
         ("telegram", "chat_id", "1001", None),
-        ("telegram", "user_id", "42", None),
-        ("telegram", "user_id", "99", None),
+        ("telegram", "phone_number", "+15551234567", "person_telegram_user_42"),
+        ("telegram", "user_id", "42", "person_telegram_user_42"),
+        ("telegram", "user_id", "99", "person_telegram_user_99"),
+        ("telegram", "username", "ariel", "person_telegram_user_42"),
+        ("telegram", "username", "jonsuderman", "person_telegram_user_99"),
     ]
-    assert len(aliases) == 6
+    assert len(person_aliases) == 5
+    assert {value for _, value, _ in person_aliases} == {
+        "+15551234567",
+        "@ariel",
+        "@jonsuderman",
+        "Ariel Example",
+        "Jon Suderman",
+    }
+    assert len(aliases) == 9
     assert {value for _, value, _ in aliases} == {
         "+15551234567",
         "@ariel",
@@ -289,6 +316,12 @@ def test_sync_telegram_entities_persists_users_chats_and_aliases(tmp_path) -> No
         "Ariel",
         "Ariel Example",
         "Jon Suderman",
+    }
+    assert len(resolutions) == 5
+    assert {method for _, _, method in resolutions} == {
+        "telegram_phone_number",
+        "telegram_user_id",
+        "telegram_username",
     }
 
 
@@ -298,15 +331,78 @@ def test_sync_telegram_entities_is_idempotent(tmp_path) -> None:
     first = sync_telegram_entities(paths, date="2026-03-31")
     second = sync_telegram_entities(paths, date="2026-03-31")
 
-    assert first.identities_synced == second.identities_synced == 3
-    assert first.aliases_synced == second.aliases_synced == 6
+    assert first.persons_synced == second.persons_synced == 2
+    assert first.identities_synced == second.identities_synced == 6
+    assert first.person_aliases_synced == second.person_aliases_synced == 5
+    assert first.aliases_synced == second.aliases_synced == 9
+    assert first.resolutions_synced == second.resolutions_synced == 5
 
     with sqlite3.connect(paths.database) as connection:
+        person_count = connection.execute("select count(*) from persons").fetchone()[0]
         identity_count = connection.execute("select count(*) from identities").fetchone()[0]
+        person_alias_count = connection.execute("select count(*) from aliases").fetchone()[0]
         alias_count = connection.execute("select count(*) from identity_aliases").fetchone()[0]
+        resolution_count = connection.execute("select count(*) from resolutions").fetchone()[0]
 
-    assert identity_count == 3
-    assert alias_count == 6
+    assert person_count == 2
+    assert identity_count == 6
+    assert person_alias_count == 5
+    assert alias_count == 9
+    assert resolution_count == 5
+
+
+def test_sync_telegram_entities_resolves_private_chat_identity_to_person(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    target_dir = paths.raw_capture_dir("telegram", "2026-04-04")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "updates.jsonl").write_text(
+        json.dumps(
+            {
+                "account": "personal",
+                "payload": {
+                    "chat": {
+                        "id": 1002,
+                        "type": {"@type": "chatTypePrivate", "user_id": 42},
+                    },
+                    "message": {
+                        "chat_id": 1002,
+                        "content": {"@type": "messageText", "text": {"text": "hello"}},
+                        "date": 1774976467,
+                        "id": 9106,
+                        "sender_id": {"@type": "messageSenderUser", "user_id": 42},
+                    },
+                    "users": [
+                        {
+                            "id": 42,
+                            "first_name": "Ariel",
+                            "last_name": "Example",
+                            "usernames": {"active_usernames": ["ariel"]},
+                        }
+                    ],
+                },
+                "received_at": "2026-04-04T10:00:00Z",
+                "source": "telegram",
+                "update_type": "updateNewMessage",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = sync_telegram_entities(paths, date="2026-04-04")
+
+    assert result.persons_synced == 1
+    assert result.resolutions_synced == 3
+    with sqlite3.connect(paths.database) as connection:
+        chat_identity = connection.execute(
+            "select person_id from identities where source = 'telegram' and kind = 'chat_id' and value = '1002'"
+        ).fetchone()
+        chat_resolution = connection.execute(
+            "select method from resolutions where identity_id = 'ident_telegram_chat_1002'"
+        ).fetchone()
+
+    assert chat_identity == ("person_telegram_user_42",)
+    assert chat_resolution == ("telegram_private_chat",)
 
 
 def test_append_telegram_update_writes_raw_envelope_and_cursor(tmp_path) -> None:

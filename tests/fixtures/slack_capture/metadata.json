@@ -19,6 +19,20 @@
   "team_id": "T123",
   "user": "jon",
   "user_id": "USELF",
+  "user_profiles": {
+    "UPEER": {
+      "deleted": false,
+      "display_name": "Ariel",
+      "email": "ariel@example.com",
+      "real_name": "Ariel"
+    },
+    "USELF": {
+      "deleted": false,
+      "display_name": "Jon",
+      "email": "jon@example.com",
+      "real_name": "Jon"
+    }
+  },
   "users": {
     "UPEER": "Ariel",
     "USELF": "Jon"

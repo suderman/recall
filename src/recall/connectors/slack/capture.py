@@ -46,6 +46,7 @@ class SlackWindowCapture:
     oldest: str
     latest: str
     users: dict[str, str]
+    user_profiles: dict[str, dict[str, Any]]
     conversations: list[dict[str, Any]]
     messages: list[dict[str, Any]]
     stats: dict[str, int]
@@ -112,6 +113,26 @@ def build_user_display_name(user: dict[str, Any]) -> str:
 
 def build_user_lookup(users: list[dict[str, Any]]) -> dict[str, str]:
     return {user["id"]: build_user_display_name(user) for user in users if user.get("id")}
+
+
+def build_user_profiles(users: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    profiles: dict[str, dict[str, Any]] = {}
+    for user in users:
+        user_id = user.get("id")
+        if not user_id:
+            continue
+        profile_value = user.get("profile")
+        profile: dict[str, Any] = profile_value if isinstance(profile_value, dict) else {}
+        profiles[str(user_id)] = {
+            "display_name": build_user_display_name(user),
+            "real_name": normalize_whitespace(
+                profile.get("real_name") or user.get("real_name") or user.get("name")
+            )
+            or None,
+            "email": normalize_whitespace(profile.get("email")) or None,
+            "deleted": bool(user.get("deleted")),
+        }
+    return profiles
 
 
 def resolve_user_name(
@@ -251,6 +272,7 @@ def collect_slack_window(
     auth = client.auth_test()
     users = client.list_users()
     user_lookup = build_user_lookup(users)
+    user_profiles = build_user_profiles(users)
     conversations = client.list_conversations(include_archived=True)
 
     stats = {
@@ -359,6 +381,7 @@ def collect_slack_window(
         oldest=oldest,
         latest=latest,
         users=user_lookup,
+        user_profiles=user_profiles,
         conversations=conversation_rows,
         messages=message_rows,
         stats=stats,
@@ -424,6 +447,7 @@ def build_day_metadata(
     account: str,
     auth: dict[str, Any],
     users: dict[str, str],
+    user_profiles: dict[str, dict[str, Any]],
     conversations: list[dict[str, Any]],
     messages: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -450,6 +474,7 @@ def build_day_metadata(
         "oldest": min(message_ts, key=ts_sort_key) if message_ts else None,
         "latest": max(message_ts, key=ts_sort_key) if message_ts else None,
         "users": users,
+        "user_profiles": user_profiles,
         "stats": {
             "total_listed": len(conversations),
             "checked": len(conversations),
@@ -469,6 +494,7 @@ def write_day_capture(
     account: str,
     auth: dict[str, Any],
     users: dict[str, str],
+    user_profiles: dict[str, dict[str, Any]],
     conversations: list[dict[str, Any]],
     messages: list[dict[str, Any]],
 ) -> SlackCaptureResult:
@@ -478,6 +504,7 @@ def write_day_capture(
         account=account,
         auth=auth,
         users=users,
+        user_profiles=user_profiles,
         conversations=conversations,
         messages=messages,
     )
@@ -502,6 +529,7 @@ def merge_day_capture(
     account: str,
     auth: dict[str, Any],
     users: dict[str, str],
+    user_profiles: dict[str, dict[str, Any]],
     conversations: list[dict[str, Any]],
     messages: list[dict[str, Any]],
 ) -> SlackCaptureResult:
@@ -512,6 +540,10 @@ def merge_day_capture(
 
     merged_users = dict(existing_metadata.get("users", {}) if existing_metadata else {})
     merged_users.update(users)
+    merged_user_profiles = dict(
+        existing_metadata.get("user_profiles", {}) if existing_metadata else {}
+    )
+    merged_user_profiles.update(user_profiles)
     merged_messages = merge_message_rows(existing_messages, messages)
     merged_conversations = merge_conversation_rows(
         existing_conversations, conversations, merged_messages
@@ -523,6 +555,7 @@ def merge_day_capture(
         account=account,
         auth=auth,
         users=merged_users,
+        user_profiles=merged_user_profiles,
         conversations=merged_conversations,
         messages=merged_messages,
     )
@@ -553,6 +586,7 @@ def capture_slack_day(
         account=account,
         auth=capture.auth,
         users=capture.users,
+        user_profiles=capture.user_profiles,
         conversations=capture.conversations,
         messages=capture.messages,
     )
@@ -610,6 +644,7 @@ def capture_slack_incremental(
             account=account,
             auth=capture.auth,
             users=capture.users,
+            user_profiles=capture.user_profiles,
             conversations=day_conversations,
             messages=day_messages,
         )

@@ -484,8 +484,11 @@ def sync_telegram_entities(
     paths.ensure_directories()
     result = sync_telegram_entities_for_date(paths, date=date)
     typer.echo(f"Synced Telegram entities for {date}")
+    typer.echo(f"persons={result.persons_synced}")
     typer.echo(f"identities={result.identities_synced}")
+    typer.echo(f"person_aliases={result.person_aliases_synced}")
     typer.echo(f"identity_aliases={result.aliases_synced}")
+    typer.echo(f"resolutions={result.resolutions_synced}")
 
 
 def show_telegram_state(

@@ -10,6 +10,12 @@ from recall.cli.artifacts import (
     download_slack_artifact_bytes,
     show_artifacts,
 )
+from recall.cli.entities import (
+    run_entity_matching,
+    show_identities,
+    show_people,
+    show_resolutions,
+)
 from recall.cli.events import show_events
 from recall.config import resolve_root
 from recall.connectors.bluebubbles.cli import (
@@ -47,6 +53,7 @@ artifacts_app = typer.Typer(help="Inspect normalized artifact metadata.")
 artifacts_download_app = typer.Typer(help="Download source-native artifact bytes.")
 entities_app = typer.Typer(help="Manage identity and entity storage.")
 entities_sync_app = typer.Typer(help="Sync source identities into SQLite.")
+entities_show_app = typer.Typer(help="Show people, identities, and resolutions.")
 state_app = typer.Typer(help="Inspect operational connector state.")
 state_show_app = typer.Typer(help="Show stored connector state.")
 bluebubbles_capture_app = typer.Typer(help="BlueBubbles capture commands.")
@@ -63,6 +70,7 @@ app.add_typer(state_app, name="state")
 app.add_typer(import_app, name="import")
 app.add_typer(export_app, name="export")
 entities_app.add_typer(entities_sync_app, name="sync")
+entities_app.add_typer(entities_show_app, name="show")
 state_app.add_typer(state_show_app, name="show")
 artifacts_app.add_typer(artifacts_download_app, name="download")
 capture_app.add_typer(bluebubbles_capture_app, name="bluebubbles")
@@ -146,6 +154,10 @@ artifacts_download_app.command("bluebubbles")(download_bluebubbles_artifact_byte
 entities_sync_app.command("slack")(sync_slack_entities)
 entities_sync_app.command("bluebubbles")(sync_bluebubbles_entities)
 entities_sync_app.command("telegram")(sync_telegram_entities)
+entities_show_app.command("people")(show_people)
+entities_show_app.command("identities")(show_identities)
+entities_show_app.command("resolutions")(show_resolutions)
+entities_app.command("match")(run_entity_matching)
 state_show_app.command("slack")(show_slack_state)
 state_show_app.command("telegram")(show_telegram_state)
 import_app.command("bluebubbles-export")(import_bluebubbles_export_bundle)

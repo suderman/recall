@@ -7,14 +7,23 @@ from pathlib import Path
 from typing import Any
 
 from recall.connectors.telegram.capture import parse_date, raw_capture_paths
-from recall.entities.storage import upsert_identities, upsert_identity_aliases
+from recall.entities.storage import (
+    upsert_aliases,
+    upsert_identities,
+    upsert_identity_aliases,
+    upsert_persons,
+    upsert_resolutions,
+)
 from recall.storage.paths import RecallPaths
 
 
 @dataclass(frozen=True, slots=True)
 class TelegramEntitySyncResult:
+    persons_synced: int
     identities_synced: int
     aliases_synced: int
+    person_aliases_synced: int
+    resolutions_synced: int
 
 
 def _load_raw_updates(path: Path) -> list[dict[str, Any]]:
@@ -26,9 +35,25 @@ def _load_raw_updates(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _hash_id(prefix: str, *parts: str) -> str:
+    payload = ":".join(parts).encode("utf-8")
+    return f"{prefix}_{hashlib.sha256(payload).hexdigest()[:20]}"
+
+
 def _identity_alias_id(identity_id: str, value: str, source: str) -> str:
-    payload = f"{identity_id}:{value}:{source}".encode("utf-8")
-    return f"ialias_{hashlib.sha256(payload).hexdigest()[:20]}"
+    return _hash_id("ialias", identity_id, value, source)
+
+
+def _alias_id(person_id: str, value: str, source: str) -> str:
+    return _hash_id("alias", person_id, value, source)
+
+
+def _resolution_id(identity_id: str, person_id: str, method: str) -> str:
+    return _hash_id("res", identity_id, person_id, method)
+
+
+def _person_id(user_id: int | str) -> str:
+    return f"person_telegram_user_{user_id}"
 
 
 def _user_identity_id(user_id: int | str) -> str:
@@ -37,6 +62,15 @@ def _user_identity_id(user_id: int | str) -> str:
 
 def _chat_identity_id(chat_id: int | str) -> str:
     return f"ident_telegram_chat_{chat_id}"
+
+
+def _username_identity_id(username: str) -> str:
+    return f"ident_telegram_username_{username}"
+
+
+def _phone_identity_id(phone_number: str) -> str:
+    digits = phone_number.replace("+", "plus_").replace("-", "_")
+    return f"ident_telegram_phone_{digits}"
 
 
 def _created_at(rows: list[dict[str, Any]], date: str) -> str:
@@ -61,12 +95,130 @@ def _chat(payload: dict[str, Any]) -> dict[str, Any]:
     return chat if isinstance(chat, dict) else {}
 
 
-def _alias_row(identity_id: str, value: str, created_at: str, source: str) -> dict[str, Any]:
+def _sort_name(first_name: str, last_name: str) -> str | None:
+    first = first_name.strip()
+    last = last_name.strip()
+    if first and last:
+        return f"{last}, {first}"
+    if last:
+        return last
+    if first:
+        return first
+    return None
+
+
+def _usernames(user: dict[str, Any]) -> list[str]:
+    usernames = user.get("usernames")
+    if isinstance(usernames, list):
+        return [
+            str(username).lstrip("@").strip() for username in usernames if str(username).strip()
+        ]
+    if isinstance(usernames, dict):
+        values: list[str] = []
+        for username in usernames.get("active_usernames") or []:
+            text = str(username).lstrip("@").strip()
+            if text:
+                values.append(text)
+        editable = str(usernames.get("editable_username") or "").lstrip("@").strip()
+        if editable:
+            values.append(editable)
+        deduped: list[str] = []
+        for value in values:
+            if value not in deduped:
+                deduped.append(value)
+        return deduped
+    return []
+
+
+def _display_name(user: dict[str, Any]) -> str:
+    first = str(user.get("first_name") or "").strip()
+    last = str(user.get("last_name") or "").strip()
+    full_name = " ".join(part for part in (first, last) if part).strip()
+    if full_name:
+        return full_name
+    usernames = _usernames(user)
+    if usernames:
+        return f"@{usernames[0]}"
+    return f"Telegram user {user.get('id')}"
+
+
+def _identity_row(
+    *,
+    identity_id: str,
+    person_id: str | None,
+    kind: str,
+    value: str,
+    label: str,
+    created_at: str,
+    is_primary: bool = False,
+) -> dict[str, Any]:
+    return {
+        "identity_id": identity_id,
+        "person_id": person_id,
+        "source": "telegram",
+        "kind": kind,
+        "value": value,
+        "label": label,
+        "is_primary": is_primary,
+        "status": "active",
+        "valid_from": None,
+        "valid_to": None,
+        "created_at": created_at,
+    }
+
+
+def _person_row(user: dict[str, Any], created_at: str) -> dict[str, Any]:
+    first = str(user.get("first_name") or "").strip()
+    last = str(user.get("last_name") or "").strip()
+    display_name = _display_name(user)
+    return {
+        "person_id": _person_id(user["id"]),
+        "display_name": display_name,
+        "sort_name": _sort_name(first, last),
+        "notes": "",
+        "tags": [],
+        "created_at": created_at,
+    }
+
+
+def _person_alias_row(person_id: str, value: str, source: str, created_at: str) -> dict[str, Any]:
+    return {
+        "alias_id": _alias_id(person_id, value, source),
+        "person_id": person_id,
+        "value": value,
+        "source": source,
+        "created_at": created_at,
+    }
+
+
+def _identity_alias_row(
+    identity_id: str, value: str, source: str, created_at: str
+) -> dict[str, Any]:
     return {
         "identity_alias_id": _identity_alias_id(identity_id, value, source),
         "identity_id": identity_id,
         "value": value,
         "source": source,
+        "created_at": created_at,
+    }
+
+
+def _resolution_row(
+    identity_id: str,
+    person_id: str,
+    created_at: str,
+    *,
+    method: str,
+    confidence: str,
+    evidence: list[str],
+) -> dict[str, Any]:
+    return {
+        "resolution_id": _resolution_id(identity_id, person_id, method),
+        "identity_id": identity_id,
+        "person_id": person_id,
+        "confidence": confidence,
+        "method": method,
+        "evidence": evidence,
         "created_at": created_at,
     }
 
@@ -80,114 +232,215 @@ def sync_telegram_entities(paths: RecallPaths, *, date: str) -> TelegramEntitySy
 
     rows = _load_raw_updates(updates_path)
     created_at = _created_at(rows, date)
+    person_rows: list[dict[str, Any]] = []
     identity_rows: list[dict[str, Any]] = []
-    alias_rows: list[dict[str, Any]] = []
-    identity_seen: set[str] = set()
-    alias_seen: set[tuple[str, str, str]] = set()
+    identity_alias_rows: list[dict[str, Any]] = []
+    person_alias_rows: list[dict[str, Any]] = []
+    resolution_rows: list[dict[str, Any]] = []
+
+    person_seen: set[str] = set()
+    identity_seen: set[tuple[str, str, str]] = set()
+    identity_alias_seen: set[tuple[str, str, str]] = set()
+    person_alias_seen: set[tuple[str, str, str]] = set()
+    resolution_seen: set[tuple[str, str, str]] = set()
+
+    users_by_id: dict[str, dict[str, Any]] = {}
+    chats: list[dict[str, Any]] = []
 
     for row in rows:
         payload = _payload(row)
+        chats.append(_chat(payload))
         for user in payload.get("users") or []:
-            if not isinstance(user, dict) or user.get("id") is None:
-                continue
-            user_id = str(user["id"])
-            identity_id = _user_identity_id(user_id)
-            if identity_id not in identity_seen:
-                identity_rows.append(
-                    {
-                        "identity_id": identity_id,
-                        "person_id": None,
-                        "source": "telegram",
-                        "kind": "user_id",
-                        "value": user_id,
-                        "label": "Telegram user ID",
-                        "is_primary": False,
-                        "status": "active",
-                        "valid_from": None,
-                        "valid_to": None,
-                        "created_at": created_at,
-                    }
+            if isinstance(user, dict) and user.get("id") is not None:
+                users_by_id[str(user["id"])] = user
+
+    for user in users_by_id.values():
+        user_id = str(user["id"])
+        person_id = _person_id(user_id)
+        if person_id not in person_seen:
+            person_rows.append(_person_row(user, created_at))
+            person_seen.add(person_id)
+
+        user_identity = ("user_id", user_id, _user_identity_id(user_id))
+        if user_identity not in identity_seen:
+            identity_rows.append(
+                _identity_row(
+                    identity_id=user_identity[2],
+                    person_id=person_id,
+                    kind="user_id",
+                    value=user_id,
+                    label="Telegram user ID",
+                    created_at=created_at,
+                    is_primary=True,
                 )
-                identity_seen.add(identity_id)
+            )
+            identity_seen.add(user_identity)
 
-            aliases: list[tuple[str, str]] = []
-            first = str(user.get("first_name") or "").strip()
-            last = str(user.get("last_name") or "").strip()
-            full_name = " ".join(part for part in (first, last) if part).strip()
-            if full_name:
-                aliases.append((full_name, "telegram_display_name"))
-            elif first:
-                aliases.append((first, "telegram_display_name"))
-            for username in user.get("usernames") or []:
-                text = f"@{str(username).lstrip('@').strip()}"
-                if text != "@":
-                    aliases.append((text, "telegram_username"))
-            phone_number = str(user.get("phone_number") or "").strip()
-            if phone_number:
-                aliases.append((phone_number, "telegram_phone_number"))
-
-            for value, source in aliases:
-                key = (identity_id, value, source)
-                if key in alias_seen:
-                    continue
-                alias_seen.add(key)
-                alias_rows.append(_alias_row(identity_id, value, created_at, source))
-
-        chat = _chat(payload)
-        if chat.get("id") is not None:
-            chat_identity_id = _chat_identity_id(chat["id"])
-            if chat_identity_id not in identity_seen:
-                identity_rows.append(
-                    {
-                        "identity_id": chat_identity_id,
-                        "person_id": None,
-                        "source": "telegram",
-                        "kind": "chat_id",
-                        "value": str(chat["id"]),
-                        "label": "Telegram chat ID",
-                        "is_primary": False,
-                        "status": "active",
-                        "valid_from": None,
-                        "valid_to": None,
-                        "created_at": created_at,
-                    }
+        resolution_key = (user_identity[2], person_id, "telegram_user_id")
+        if resolution_key not in resolution_seen:
+            resolution_rows.append(
+                _resolution_row(
+                    user_identity[2],
+                    person_id,
+                    created_at,
+                    method="telegram_user_id",
+                    confidence="high",
+                    evidence=[f"Observed exact Telegram user id {user_id}"],
                 )
-                identity_seen.add(chat_identity_id)
+            )
+            resolution_seen.add(resolution_key)
 
-            title = str(chat.get("title") or "").strip()
-            if title:
-                key = (chat_identity_id, title, "telegram_chat_title")
-                if key not in alias_seen:
-                    alias_seen.add(key)
-                    alias_rows.append(
-                        _alias_row(chat_identity_id, title, created_at, "telegram_chat_title")
+        first = str(user.get("first_name") or "").strip()
+        last = str(user.get("last_name") or "").strip()
+        full_name = " ".join(part for part in (first, last) if part).strip()
+        person_aliases: list[tuple[str, str]] = []
+        identity_aliases: list[tuple[str, str, str]] = []
+        if full_name:
+            person_aliases.append((full_name, "telegram_display_name"))
+            identity_aliases.append((user_identity[2], full_name, "telegram_display_name"))
+        elif first:
+            person_aliases.append((first, "telegram_display_name"))
+            identity_aliases.append((user_identity[2], first, "telegram_display_name"))
+
+        for username in _usernames(user):
+            username_identity = ("username", username, _username_identity_id(username))
+            if username_identity not in identity_seen:
+                identity_rows.append(
+                    _identity_row(
+                        identity_id=username_identity[2],
+                        person_id=person_id,
+                        kind="username",
+                        value=username,
+                        label="Telegram username",
+                        created_at=created_at,
                     )
-
-        message = _message(payload)
-        sender = message.get("sender_id") or {}
-        if sender.get("@type") == "messageSenderChat" and sender.get("chat_id") is not None:
-            chat_identity_id = _chat_identity_id(sender["chat_id"])
-            if chat_identity_id not in identity_seen:
-                identity_rows.append(
-                    {
-                        "identity_id": chat_identity_id,
-                        "person_id": None,
-                        "source": "telegram",
-                        "kind": "chat_id",
-                        "value": str(sender["chat_id"]),
-                        "label": "Telegram chat ID",
-                        "is_primary": False,
-                        "status": "active",
-                        "valid_from": None,
-                        "valid_to": None,
-                        "created_at": created_at,
-                    }
                 )
-                identity_seen.add(chat_identity_id)
+                identity_seen.add(username_identity)
+            resolution_key = (username_identity[2], person_id, "telegram_username")
+            if resolution_key not in resolution_seen:
+                resolution_rows.append(
+                    _resolution_row(
+                        username_identity[2],
+                        person_id,
+                        created_at,
+                        method="telegram_username",
+                        confidence="high",
+                        evidence=[f"Observed active Telegram username @{username}"],
+                    )
+                )
+                resolution_seen.add(resolution_key)
 
+            handle = f"@{username}"
+            person_aliases.append((handle, "telegram_username"))
+            identity_aliases.append((username_identity[2], handle, "telegram_username"))
+            identity_aliases.append((user_identity[2], handle, "telegram_username"))
+
+        phone_number = str(user.get("phone_number") or "").strip()
+        if phone_number:
+            phone_identity = ("phone_number", phone_number, _phone_identity_id(phone_number))
+            if phone_identity not in identity_seen:
+                identity_rows.append(
+                    _identity_row(
+                        identity_id=phone_identity[2],
+                        person_id=person_id,
+                        kind="phone_number",
+                        value=phone_number,
+                        label="Telegram phone number",
+                        created_at=created_at,
+                    )
+                )
+                identity_seen.add(phone_identity)
+            resolution_key = (phone_identity[2], person_id, "telegram_phone_number")
+            if resolution_key not in resolution_seen:
+                resolution_rows.append(
+                    _resolution_row(
+                        phone_identity[2],
+                        person_id,
+                        created_at,
+                        method="telegram_phone_number",
+                        confidence="high",
+                        evidence=[f"Observed Telegram phone number {phone_number}"],
+                    )
+                )
+                resolution_seen.add(resolution_key)
+
+            person_aliases.append((phone_number, "telegram_phone_number"))
+            identity_aliases.append((phone_identity[2], phone_number, "telegram_phone_number"))
+            identity_aliases.append((user_identity[2], phone_number, "telegram_phone_number"))
+
+        for value, source in person_aliases:
+            key = (person_id, value, source)
+            if key not in person_alias_seen:
+                person_alias_rows.append(_person_alias_row(person_id, value, source, created_at))
+                person_alias_seen.add(key)
+
+        for identity_id, value, source in identity_aliases:
+            key = (identity_id, value, source)
+            if key not in identity_alias_seen:
+                identity_alias_rows.append(
+                    _identity_alias_row(identity_id, value, source, created_at)
+                )
+                identity_alias_seen.add(key)
+
+    for chat in chats:
+        if chat.get("id") is None:
+            continue
+        chat_id = str(chat["id"])
+        chat_type_value = chat.get("type")
+        chat_type: dict[str, Any] = chat_type_value if isinstance(chat_type_value, dict) else {}
+        chat_type_name = str(chat_type.get("@type") or "")
+        linked_person_id: str | None = None
+        linked_user_id = chat_type.get("user_id")
+        if chat_type_name in {"chatTypePrivate", "chatTypeSecret"} and linked_user_id is not None:
+            linked_person_id = _person_id(linked_user_id)
+
+        chat_identity = ("chat_id", chat_id, _chat_identity_id(chat_id))
+        if chat_identity not in identity_seen:
+            identity_rows.append(
+                _identity_row(
+                    identity_id=chat_identity[2],
+                    person_id=linked_person_id,
+                    kind="chat_id",
+                    value=chat_id,
+                    label="Telegram chat ID",
+                    created_at=created_at,
+                )
+            )
+            identity_seen.add(chat_identity)
+
+        if linked_person_id is not None:
+            resolution_key = (chat_identity[2], linked_person_id, "telegram_private_chat")
+            if resolution_key not in resolution_seen:
+                resolution_rows.append(
+                    _resolution_row(
+                        chat_identity[2],
+                        linked_person_id,
+                        created_at,
+                        method="telegram_private_chat",
+                        confidence="high",
+                        evidence=[f"Telegram private chat maps to user id {linked_user_id}"],
+                    )
+                )
+                resolution_seen.add(resolution_key)
+
+        title = str(chat.get("title") or "").strip()
+        if title:
+            key = (chat_identity[2], title, "telegram_chat_title")
+            if key not in identity_alias_seen:
+                identity_alias_rows.append(
+                    _identity_alias_row(chat_identity[2], title, "telegram_chat_title", created_at)
+                )
+                identity_alias_seen.add(key)
+
+    persons_synced = upsert_persons(paths, person_rows)
     identities_synced = upsert_identities(paths, identity_rows)
-    aliases_synced = upsert_identity_aliases(paths, alias_rows)
+    person_aliases_synced = upsert_aliases(paths, person_alias_rows)
+    aliases_synced = upsert_identity_aliases(paths, identity_alias_rows)
+    resolutions_synced = upsert_resolutions(paths, resolution_rows)
     return TelegramEntitySyncResult(
+        persons_synced=persons_synced,
         identities_synced=identities_synced,
         aliases_synced=aliases_synced,
+        person_aliases_synced=person_aliases_synced,
+        resolutions_synced=resolutions_synced,
     )

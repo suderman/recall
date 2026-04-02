@@ -9,6 +9,7 @@ class RecallPaths:
     root: Path
     config: Path
     sources_config: Path
+    entity_resolution_config: Path
     data: Path
     raw: Path
     normalized: Path
@@ -33,6 +34,7 @@ class RecallPaths:
             root=root,
             config=root / "config",
             sources_config=root / "config" / "sources",
+            entity_resolution_config=root / "config" / "entity-resolution",
             data=data,
             raw=data / "raw",
             normalized=data / "normalized",
@@ -52,6 +54,7 @@ class RecallPaths:
         for directory in (
             self.config,
             self.sources_config,
+            self.entity_resolution_config,
             self.data,
             self.raw,
             self.normalized,
