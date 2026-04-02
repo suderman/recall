@@ -4,13 +4,15 @@ import shutil
 import sqlite3
 from pathlib import Path
 
-from recall.connectors.telegram.entities import sync_telegram_entities
+from recall.connectors.email.entities import sync_email_entities
 from recall.connectors.slack.entities import sync_slack_entities
+from recall.connectors.telegram.entities import sync_telegram_entities
 from recall.entities.resolve import match_entities
 from recall.entities.storage import upsert_identities, upsert_persons
 from recall.storage.paths import RecallPaths
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "telegram"
+EMAIL_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "email" / "messages"
 
 
 def _copy_telegram_fixture_capture(tmp_path: Path) -> RecallPaths:
@@ -19,6 +21,12 @@ def _copy_telegram_fixture_capture(tmp_path: Path) -> RecallPaths:
     target_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(FIXTURE_DIR / "updates.jsonl", target_dir / "updates.jsonl")
     return paths
+
+
+def _email_runner(arguments: list[str]) -> str:
+    assert arguments[:4] == ["notmuch", "search", "--output=files", "--format=text"]
+    fixture_paths = sorted(str(path) for path in EMAIL_FIXTURE_DIR.glob("*.eml"))
+    return "\n".join(fixture_paths) + "\n"
 
 
 def test_match_entities_automatically_links_bluebubbles_phone_to_telegram_person(tmp_path) -> None:
@@ -49,10 +57,12 @@ def test_match_entities_automatically_links_bluebubbles_phone_to_telegram_person
     assert result.automatic_resolutions_applied == 1
     with sqlite3.connect(paths.database) as connection:
         identity = connection.execute(
-            "select person_id from identities where identity_id = 'ident_bluebubbles_plus15551234567'"
+            "select person_id from identities "
+            "where identity_id = 'ident_bluebubbles_plus15551234567'"
         ).fetchone()
         resolution = connection.execute(
-            "select method, confidence from resolutions where identity_id = 'ident_bluebubbles_plus15551234567'"
+            "select method, confidence from resolutions "
+            "where identity_id = 'ident_bluebubbles_plus15551234567'"
         ).fetchone()
 
     assert identity == ("person_telegram_user_42",)
@@ -183,8 +193,53 @@ def test_match_entities_links_slack_user_through_profile_email(tmp_path) -> None
             "select person_id from identities where identity_id = 'ident_slack_UPEER'"
         ).fetchone()
         slack_email = connection.execute(
-            "select person_id from identities where identity_id = 'ident_slack_email_ariel_at_example_com'"
+            "select person_id from identities "
+            "where identity_id = 'ident_slack_email_ariel_at_example_com'"
         ).fetchone()
 
     assert slack_user == ("person_telegram_user_42",)
     assert slack_email == ("person_telegram_user_42",)
+
+
+def test_match_entities_links_slack_user_through_synced_email_identity(tmp_path) -> None:
+    paths = _copy_telegram_fixture_capture(tmp_path)
+    slack_dir = paths.raw_capture_dir("slack", "2026-03-31")
+    slack_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("metadata.json", "conversations.json", "messages.jsonl"):
+        shutil.copy(Path(__file__).parent / "fixtures" / "slack_capture" / name, slack_dir / name)
+
+    sync_telegram_entities(paths, date="2026-03-31")
+    sync_email_entities(paths, date="2026-03-31", runner=_email_runner)
+    upsert_identities(
+        paths,
+        [
+            {
+                "identity_id": "ident_email_ariel_example_com",
+                "person_id": "person_telegram_user_42",
+                "source": "email",
+                "kind": "email",
+                "value": "ariel@example.com",
+                "label": "Email address",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T17:31:07Z",
+            }
+        ],
+    )
+    sync_slack_entities(paths, date="2026-03-31")
+
+    result = match_entities(paths)
+
+    assert result.automatic_resolutions_applied >= 2
+    with sqlite3.connect(paths.database) as connection:
+        slack_user = connection.execute(
+            "select person_id from identities where identity_id = 'ident_slack_UPEER'"
+        ).fetchone()
+        email_identity = connection.execute(
+            "select person_id from identities where identity_id = 'ident_email_ariel_example_com'"
+        ).fetchone()
+
+    assert slack_user == ("person_telegram_user_42",)
+    assert email_identity == ("person_telegram_user_42",)

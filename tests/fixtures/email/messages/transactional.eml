@@ -1,0 +1,9 @@
+From: Billing Bot <receipts@service.example.com>
+To: Jon Recipient <jon@example.com>
+Subject: Your receipt
+Date: Tue, 31 Mar 2026 12:45:00 +0000
+Message-ID: <msg-transactional@example.com>
+Auto-Submitted: auto-generated
+Content-Type: text/html; charset="utf-8"
+
+<html><body><p>Your payment posted successfully.</p></body></html>

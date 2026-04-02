@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typer.testing import CliRunner
 
 import recall.cli.artifacts as artifacts_cli
+import recall.connectors.email.cli as email_cli
 from recall.cli.main import app
 from recall.connectors.telegram.entities import sync_telegram_entities
 from recall.entities.storage import upsert_identities
@@ -19,6 +20,7 @@ from recall.storage.paths import RecallPaths
 runner = CliRunner()
 SLACK_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "slack_capture"
 TELEGRAM_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "telegram"
+EMAIL_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "email" / "messages"
 
 
 def _copy_slack_fixture_capture(tmp_path) -> RecallPaths:
@@ -40,6 +42,12 @@ def _copy_telegram_fixture_capture(tmp_path) -> RecallPaths:
     shutil.copy(TELEGRAM_FIXTURE_DIR / "updates.jsonl", target_dir / "updates.jsonl")
 
     return paths
+
+
+def _email_runner(arguments: list[str]) -> str:
+    assert arguments[:4] == ["notmuch", "search", "--output=files", "--format=text"]
+    fixture_paths = sorted(str(path) for path in EMAIL_FIXTURE_DIR.glob("*.eml"))
+    return "\n".join(fixture_paths) + "\n"
 
 
 def test_init_creates_foundation(tmp_path) -> None:
@@ -379,6 +387,24 @@ def test_normalize_slack_reports_next_steps(tmp_path) -> None:
     assert "recall artifacts show --date 2026-03-31" in result.stdout
 
 
+def test_normalize_email_reports_next_steps(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        email_cli,
+        "normalize_email_day",
+        lambda *args, **kwargs: RecallPaths.from_root(tmp_path).normalized
+        / "2026"
+        / "2026-03-31.jsonl",
+    )
+
+    result = runner.invoke(
+        app,
+        ["normalize", "email", "--root", str(tmp_path), "--date", "2026-03-31"],
+    )
+
+    assert result.exit_code == 0
+    assert "recall entities sync email --date 2026-03-31" in result.stdout
+
+
 def test_capture_bluebubbles_serve_reports_webhook_url_hint(tmp_path, monkeypatch) -> None:
     config_dir = tmp_path / "config" / "sources"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -452,6 +478,23 @@ def test_entities_sync_slack_persists_identity_rows(tmp_path) -> None:
         identity_count = connection.execute("select count(*) from identities").fetchone()[0]
 
     assert identity_count == 5
+
+
+def test_entities_sync_email_persists_identity_rows(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        email_cli,
+        "sync_email_entities_for_date",
+        lambda *args, **kwargs: SimpleNamespace(identities_synced=3, aliases_synced=3),
+    )
+
+    result = runner.invoke(
+        app,
+        ["entities", "sync", "email", "--root", str(tmp_path), "--date", "2026-03-31"],
+    )
+
+    assert result.exit_code == 0
+    assert "identities=3" in result.stdout
+    assert "identity_aliases=3" in result.stdout
 
 
 def test_normalize_telegram_reports_next_steps(tmp_path) -> None:

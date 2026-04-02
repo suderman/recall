@@ -26,6 +26,7 @@ from recall.connectors.bluebubbles.cli import (
     serve_bluebubbles,
     sync_bluebubbles_entities,
 )
+from recall.connectors.email.cli import normalize_email, sync_email_entities
 from recall.connectors.slack.cli import (
     capture_slack,
     normalize_slack,
@@ -39,8 +40,8 @@ from recall.connectors.telegram.cli import (
     import_telegram_export_bundle,
     normalize_telegram,
     run_telegram_capture,
-    run_telegram_tdlib_daemon,
     run_telegram_tdlib_capture,
+    run_telegram_tdlib_daemon,
     show_telegram_state,
     sync_telegram_entities,
 )
@@ -149,6 +150,7 @@ telegram_capture_app.command("tdlib-run")(run_telegram_tdlib_capture)
 normalize_app.command("slack")(normalize_slack)
 normalize_app.command("bluebubbles")(normalize_bluebubbles)
 normalize_app.command("telegram")(normalize_telegram)
+normalize_app.command("email")(normalize_email)
 events_app.command("show")(show_events)
 artifacts_app.command("show")(show_artifacts)
 artifacts_download_app.command("slack")(download_slack_artifact_bytes)
@@ -157,6 +159,7 @@ artifacts_download_app.command("telegram")(download_telegram_artifact_bytes)
 entities_sync_app.command("slack")(sync_slack_entities)
 entities_sync_app.command("bluebubbles")(sync_bluebubbles_entities)
 entities_sync_app.command("telegram")(sync_telegram_entities)
+entities_sync_app.command("email")(sync_email_entities)
 entities_show_app.command("people")(show_people)
 entities_show_app.command("identities")(show_identities)
 entities_show_app.command("resolutions")(show_resolutions)
