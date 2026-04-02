@@ -8,6 +8,7 @@ from recall import __version__
 from recall.cli.artifacts import (
     download_bluebubbles_artifact_bytes,
     download_slack_artifact_bytes,
+    download_telegram_artifact_bytes,
     show_artifacts,
 )
 from recall.cli.entities import (
@@ -151,6 +152,7 @@ events_app.command("show")(show_events)
 artifacts_app.command("show")(show_artifacts)
 artifacts_download_app.command("slack")(download_slack_artifact_bytes)
 artifacts_download_app.command("bluebubbles")(download_bluebubbles_artifact_bytes)
+artifacts_download_app.command("telegram")(download_telegram_artifact_bytes)
 entities_sync_app.command("slack")(sync_slack_entities)
 entities_sync_app.command("bluebubbles")(sync_bluebubbles_entities)
 entities_sync_app.command("telegram")(sync_telegram_entities)

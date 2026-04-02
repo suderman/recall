@@ -730,6 +730,55 @@ def test_capture_telegram_tdlib_daemon_advances_cursor_between_cycles(
     assert "cycle=2 captured_updates=0 last_update_id=-" in result.stdout
 
 
+def test_artifacts_download_telegram_reports_dry_run(tmp_path, monkeypatch) -> None:
+    import recall.cli.artifacts as artifacts_cli
+
+    paths = RecallPaths.from_root(tmp_path)
+    artifact_path = paths.artifact_metadata_path("telegram", "2026-04-02")
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        artifacts_cli,
+        "download_telegram_artifacts",
+        lambda *args, **kwargs: SimpleNamespace(
+            artifacts_seen=1,
+            would_download=1,
+            downloaded=0,
+            skipped_policy=0,
+            skipped_existing=0,
+            failed=0,
+            artifact_path=artifact_path,
+        ),
+    )
+    monkeypatch.setattr(
+        artifacts_cli,
+        "build_tdlib_auth_settings",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("missing tdlib auth")),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "artifacts",
+            "download",
+            "telegram",
+            "--root",
+            str(tmp_path),
+            "--date",
+            "2026-04-02",
+            "--policy",
+            "download-source-native",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "source=telegram" in result.stdout
+    assert "would_download=1" in result.stdout
+    assert "next_step=run without --dry-run to fetch Telegram media bytes" in result.stdout
+
+
 def test_entities_sync_telegram_persists_identity_rows(tmp_path) -> None:
     paths = _copy_telegram_fixture_capture(tmp_path)
 

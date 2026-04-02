@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from getpass import getpass
 from pathlib import Path
 from typing import Any, Callable, Protocol
+from uuid import uuid4
 
 from recall.connectors.telegram.client import TelegramCaptureClient, TelegramUpdate
 from recall.connectors.telegram.config import (
@@ -110,6 +111,10 @@ class TdlibJsonTransport:
             )
 
         self._library = ctypes.CDLL(resolved_library)
+        if hasattr(self._library, "td_set_log_verbosity_level"):
+            self._library.td_set_log_verbosity_level.argtypes = [ctypes.c_int]
+            self._library.td_set_log_verbosity_level.restype = None
+            self._library.td_set_log_verbosity_level(int(log_verbosity_level))
         self._library.td_json_client_create.restype = ctypes.c_void_p
         self._library.td_json_client_send.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
         self._library.td_json_client_receive.argtypes = [ctypes.c_void_p, ctypes.c_double]
@@ -120,6 +125,8 @@ class TdlibJsonTransport:
         self._client = self._library.td_json_client_create()
         if not self._client:
             raise RuntimeError("Failed to create TDLib client")
+        if int(log_verbosity_level) == 0:
+            self.execute({"@type": "setLogStream", "log_stream": {"@type": "logStreamEmpty"}})
         self.execute(
             {
                 "@type": "setLogVerbosityLevel",
@@ -218,6 +225,99 @@ class TdlibTelegramClient(TelegramCaptureClient):
                 break
 
         return updates
+
+    def download_file(
+        self, file_id: int, *, timeout_seconds: float = 120.0
+    ) -> dict[str, Any] | None:
+        self._ensure_ready()
+        file_info = self._request(
+            {"@type": "getFile", "file_id": int(file_id)}, timeout_seconds=5.0
+        )
+        if file_info is not None and self._file_is_ready(file_info):
+            return file_info
+
+        extra = f"download-{file_id}-{uuid4().hex}"
+        self._transport.send(
+            {
+                "@type": "downloadFile",
+                "file_id": int(file_id),
+                "priority": 16,
+                "offset": 0,
+                "limit": 0,
+                "synchronous": True,
+                "@extra": extra,
+            }
+        )
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            event = self._transport.receive(self._receive_timeout_seconds)
+            if event is None:
+                continue
+            event_type = str(event.get("@type") or "")
+            if event_type == "updateAuthorizationState":
+                self._handle_authorization_state(event.get("authorization_state"))
+                continue
+            if event_type == "updateFile":
+                file = event.get("file")
+                if isinstance(file, dict) and int(file.get("id") or 0) == int(file_id):
+                    if self._file_is_ready(file):
+                        return file
+                continue
+            if event.get("@extra") == extra:
+                if event_type == "error":
+                    raise RuntimeError(f"TDLib downloadFile failed for file_id={file_id}: {event}")
+                if self._file_is_ready(event):
+                    return event
+                local = event.get("local")
+                if isinstance(local, dict) and local.get("path"):
+                    return event
+                continue
+
+        raise RuntimeError(f"Timed out waiting for TDLib file download: file_id={file_id}")
+
+    def download_remote_file(
+        self,
+        remote_id: str,
+        *,
+        kind: str,
+        timeout_seconds: float = 120.0,
+    ) -> dict[str, Any] | None:
+        self._ensure_ready()
+        queries = [
+            {"@type": "getRemoteFile", "remote_file_id": remote_id},
+            {
+                "@type": "getRemoteFile",
+                "remote_file_id": remote_id,
+                "file_type": self._input_file_type(kind),
+            },
+        ]
+        for query in queries:
+            file = self._request(query, timeout_seconds=5.0)
+            if file is None or str(file.get("@type") or "") == "error":
+                continue
+            file_id = file.get("id")
+            if file_id is None:
+                continue
+            return self.download_file(int(file_id), timeout_seconds=timeout_seconds)
+        return None
+
+    def _request(self, query: dict[str, Any], *, timeout_seconds: float) -> dict[str, Any] | None:
+        extra = f"request-{uuid4().hex}"
+        payload = dict(query)
+        payload["@extra"] = extra
+        self._transport.send(payload)
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            event = self._transport.receive(self._receive_timeout_seconds)
+            if event is None:
+                continue
+            event_type = str(event.get("@type") or "")
+            if event_type == "updateAuthorizationState":
+                self._handle_authorization_state(event.get("authorization_state"))
+                continue
+            if event.get("@extra") == extra:
+                return event
+        return None
 
     def _ensure_ready(self) -> None:
         if self._ready:
@@ -344,6 +444,26 @@ class TdlibTelegramClient(TelegramCaptureClient):
         if not value:
             raise RuntimeError("TDLib authentication input cannot be empty")
         return value
+
+    def _file_is_ready(self, file: dict[str, Any]) -> bool:
+        local = file.get("local")
+        if not isinstance(local, dict):
+            return False
+        path = str(local.get("path") or "").strip()
+        if not path:
+            return False
+        if local.get("is_downloading_completed") is False:
+            return False
+        return True
+
+    def _input_file_type(self, kind: str) -> dict[str, Any]:
+        if kind == "photo":
+            return {"@type": "fileTypePhoto"}
+        if kind == "document":
+            return {"@type": "fileTypeDocument"}
+        if kind == "voice_note":
+            return {"@type": "fileTypeVoiceNote"}
+        return {"@type": "fileTypeUnknown"}
 
     def _get_chat(self, chat_id: int) -> dict[str, Any] | None:
         if chat_id in self._chat_cache:

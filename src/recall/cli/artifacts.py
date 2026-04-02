@@ -13,6 +13,13 @@ from recall.connectors.bluebubbles.artifacts import download_bluebubbles_artifac
 from recall.connectors.bluebubbles.config import bluebubbles_config_path, load_bluebubbles_config
 from recall.connectors.slack.artifacts import download_slack_artifacts
 from recall.connectors.slack.config import load_slack_config, slack_config_path
+from recall.connectors.telegram.artifacts import download_telegram_artifacts
+from recall.connectors.telegram.config import load_telegram_config
+from recall.connectors.telegram.tdlib import (
+    TdlibJsonTransport,
+    TdlibTelegramClient,
+    build_tdlib_auth_settings,
+)
 from recall.storage.jsonl import read_jsonl
 from recall.storage.paths import RecallPaths
 
@@ -311,3 +318,102 @@ def download_bluebubbles_artifact_bytes(
             "and server password. Confirm Recall on kit can reach bub and that "
             "the password matches the BlueBubbles server."
         )
+
+
+def download_telegram_artifact_bytes(
+    date: str = typer.Option(
+        ..., "--date", help="Date to download artifacts for in YYYY-MM-DD format."
+    ),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+    policy: str | None = typer.Option(None, "--policy", help="Override artifact download policy."),
+    force: bool = typer.Option(False, "--force", help="Redownload even if local blob exists."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would download without writing blobs."
+    ),
+) -> None:
+    """Download source-native Telegram artifact bytes for one day."""
+
+    load_dotenv()
+    paths = _paths_for(root)
+    paths.ensure_directories()
+    config = load_telegram_config(paths)
+
+    resolved_policy = policy or config.artifact_download_policy
+    artifact_path = paths.artifact_metadata_path("telegram", date)
+    if not artifact_path.exists():
+        raise typer.BadParameter(
+            _missing_artifact_metadata_message(paths, source="telegram", date=date)
+        )
+
+    if resolved_policy != "download-source-native":
+        typer.echo("source=telegram")
+        typer.echo(f"date={date}")
+        typer.echo(f"policy={resolved_policy}")
+        typer.echo("download_mode=metadata-only")
+        typer.echo(
+            "next_step=use '--policy download-source-native' or update "
+            "config/sources/telegram.toml to fetch Telegram media bytes"
+        )
+        raise typer.Exit(code=0)
+
+    tdlib_client = None
+    tdlib_error: str | None = None
+    if not dry_run:
+        try:
+            settings = build_tdlib_auth_settings(paths, config)
+            transport = TdlibJsonTransport(
+                library_path=settings.library_path,
+                log_verbosity_level=settings.log_verbosity_level,
+            )
+            tdlib_client = TdlibTelegramClient(transport=transport, settings=settings)
+        except Exception as exc:
+            tdlib_error = str(exc)
+
+    try:
+        result = download_telegram_artifacts(
+            paths,
+            date=date,
+            policy=resolved_policy,
+            client=tdlib_client,
+            dry_run=dry_run,
+            force=force,
+        )
+    finally:
+        if tdlib_client is not None:
+            tdlib_client.close()
+
+    typer.echo("source=telegram")
+    typer.echo(f"date={date}")
+    typer.echo(f"policy={resolved_policy}")
+    typer.echo(f"dry_run={str(dry_run).lower()}")
+    typer.echo(f"artifacts_path={result.artifact_path}")
+    typer.echo(f"artifacts_seen={result.artifacts_seen}")
+    typer.echo(f"would_download={result.would_download}")
+    typer.echo(f"downloaded={result.downloaded}")
+    typer.echo(f"skipped_policy={result.skipped_policy}")
+    typer.echo(f"skipped_existing={result.skipped_existing}")
+    typer.echo(f"failed={result.failed}")
+
+    if dry_run:
+        typer.echo("next_step=run without --dry-run to fetch Telegram media bytes")
+        return
+
+    if result.downloaded > 0:
+        typer.echo(
+            f"next_step=run 'recall artifacts show --date {date} --source telegram' to inspect local mirrors"
+        )
+        return
+
+    if tdlib_error:
+        typer.echo(
+            "hint=Telegram artifact download can reuse existing local TDLib file paths, "
+            "but TDLib credentials and session state may be needed for uncached media"
+        )
+        typer.echo(f"tdlib_error={tdlib_error}")

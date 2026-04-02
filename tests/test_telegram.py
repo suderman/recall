@@ -5,6 +5,7 @@ import shutil
 import sqlite3
 from pathlib import Path
 
+from recall.connectors.telegram.artifacts import download_telegram_artifacts
 from recall.connectors.telegram.capture import (
     append_telegram_update,
     capture_telegram_updates,
@@ -15,6 +16,7 @@ from recall.connectors.telegram.config import TelegramSourceConfig
 from recall.connectors.telegram.entities import sync_telegram_entities
 from recall.connectors.telegram.normalize import normalize_telegram_day
 from recall.connectors.telegram.tdlib import (
+    TdlibJsonTransport,
     TdlibAuthSettings,
     TdlibTelegramClient,
     build_tdlib_auth_settings,
@@ -50,6 +52,37 @@ class FakeTdlibTransport:
 
     def close(self) -> None:
         self.closed = True
+
+
+class FakeTelegramArtifactClient:
+    def __init__(self, path_by_file_id: dict[int, Path]) -> None:
+        self.path_by_file_id = path_by_file_id
+        self.requests: list[int] = []
+        self.remote_requests: list[tuple[str, str]] = []
+
+    def download_file(
+        self, file_id: int, *, timeout_seconds: float = 120.0
+    ) -> dict[str, object] | None:
+        del timeout_seconds
+        self.requests.append(file_id)
+        path = self.path_by_file_id.get(file_id)
+        if path is None:
+            return None
+        return {"id": file_id, "local": {"path": str(path), "is_downloading_completed": True}}
+
+    def close(self) -> None:
+        return None
+
+    def download_remote_file(
+        self,
+        remote_id: str,
+        *,
+        kind: str,
+        timeout_seconds: float = 120.0,
+    ) -> dict[str, object] | None:
+        del timeout_seconds
+        self.remote_requests.append((remote_id, kind))
+        return None
 
 
 def _tdlib_settings(tmp_path: Path) -> TdlibAuthSettings:
@@ -257,6 +290,83 @@ def test_normalize_telegram_reply_forward_and_album_threading(tmp_path) -> None:
     assert "album" in records[2]["tags"]
 
 
+def test_normalize_telegram_tdlib_photo_uses_nested_file_metadata(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    target_dir = paths.raw_capture_dir("telegram", "2026-04-05")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "updates.jsonl").write_text(
+        json.dumps(
+            {
+                "account": "personal",
+                "payload": {
+                    "message": {
+                        "chat_id": 1004,
+                        "content": {
+                            "@type": "messagePhoto",
+                            "caption": {"text": ""},
+                            "photo": {
+                                "sizes": [
+                                    {
+                                        "width": 320,
+                                        "height": 240,
+                                        "photo": {
+                                            "id": 1256,
+                                            "expected_size": 23529,
+                                            "local": {
+                                                "path": "/tmp/telegram-small.jpg",
+                                                "is_downloading_completed": False,
+                                            },
+                                            "remote": {
+                                                "id": "remote-small",
+                                                "unique_id": "unique-small",
+                                            },
+                                        },
+                                    },
+                                    {
+                                        "width": 1280,
+                                        "height": 960,
+                                        "photo": {
+                                            "id": 1259,
+                                            "expected_size": 28741,
+                                            "local": {
+                                                "path": "/tmp/telegram-large.jpg",
+                                                "is_downloading_completed": False,
+                                            },
+                                            "remote": {
+                                                "id": "remote-large",
+                                                "unique_id": "unique-large",
+                                            },
+                                        },
+                                    },
+                                ]
+                            },
+                        },
+                        "date": 1774976467,
+                        "id": 9301,
+                        "sender_id": {"@type": "messageSenderUser", "user_id": 42},
+                    }
+                },
+                "received_at": "2026-04-05T10:00:00Z",
+                "source": "telegram",
+                "update_type": "updateNewMessage",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _, artifact_path = normalize_telegram_day(paths, date="2026-04-05")
+
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8").splitlines()[0])
+    assert artifact["source_object_id"] == "1259"
+    assert artifact["size_bytes"] == 28741
+    assert artifact["remote_locators"] == [
+        {"kind": "local_path", "value": "/tmp/telegram-large.jpg"},
+        {"kind": "remote_id", "value": "remote-large"},
+        {"kind": "remote_unique_id", "value": "unique-large"},
+    ]
+
+
 def test_sync_telegram_entities_persists_users_chats_and_aliases(tmp_path) -> None:
     paths = copy_fixture_capture(tmp_path)
 
@@ -427,6 +537,339 @@ def test_append_telegram_update_writes_raw_envelope_and_cursor(tmp_path) -> None
     assert result.cursor is not None
     assert result.cursor.cursor_key == "last_update_id"
     assert result.cursor.cursor_value == "12345"
+
+
+def test_download_telegram_artifacts_copies_existing_local_media(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    source_file = tmp_path / "source-photo.jpg"
+    source_file.write_bytes(b"telegram-photo")
+    artifact_path = paths.artifact_metadata_path("telegram", "2026-04-02")
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "artifact_id": "artifact_test",
+                "source": "telegram",
+                "kind": "photo",
+                "account": "personal",
+                "source_object_id": "9001",
+                "event_ids": ["evt_test"],
+                "remote_locators": [{"kind": "local_path", "value": str(source_file)}],
+                "local_path": None,
+                "mime_type": "image/jpeg",
+                "filename": "photo.jpg",
+                "size_bytes": 14,
+                "checksums": {},
+                "download_status": "not_requested",
+                "last_error": None,
+                "observed_at": "2026-04-02T10:00:00Z",
+                "raw_ref": None,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = download_telegram_artifacts(
+        paths,
+        date="2026-04-02",
+        policy="download-source-native",
+    )
+
+    assert result.downloaded == 1
+    records = [json.loads(line) for line in artifact_path.read_text(encoding="utf-8").splitlines()]
+    assert records[0]["download_status"] == "downloaded"
+    blob_path = tmp_path / records[0]["local_path"]
+    assert blob_path.read_bytes() == b"telegram-photo"
+
+
+def test_download_telegram_artifacts_uses_tdlib_when_local_file_missing(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    downloaded_file = tmp_path / "tdlib-photo.jpg"
+    downloaded_file.write_bytes(b"tdlib-photo")
+    artifact_path = paths.artifact_metadata_path("telegram", "2026-04-02")
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "artifact_id": "artifact_test",
+                "source": "telegram",
+                "kind": "photo",
+                "account": "personal",
+                "source_object_id": "321",
+                "event_ids": ["evt_test"],
+                "remote_locators": [{"kind": "local_path", "value": str(tmp_path / "missing.jpg")}],
+                "local_path": None,
+                "mime_type": "image/jpeg",
+                "filename": "photo.jpg",
+                "size_bytes": 11,
+                "checksums": {},
+                "download_status": "not_requested",
+                "last_error": None,
+                "observed_at": "2026-04-02T10:00:00Z",
+                "raw_ref": None,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    client = FakeTelegramArtifactClient({321: downloaded_file})
+    result = download_telegram_artifacts(
+        paths,
+        date="2026-04-02",
+        policy="download-source-native",
+        client=client,
+    )
+
+    assert result.downloaded == 1
+    assert client.requests == [321]
+
+
+def test_download_telegram_artifacts_uses_remote_id_fallback(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    downloaded_file = tmp_path / "tdlib-remote-photo.jpg"
+    downloaded_file.write_bytes(b"tdlib-remote-photo")
+    artifact_path = paths.artifact_metadata_path("telegram", "2026-04-02")
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "artifact_id": "artifact_test",
+                "source": "telegram",
+                "kind": "photo",
+                "account": "personal",
+                "source_object_id": "1258",
+                "event_ids": ["evt_test"],
+                "remote_locators": [
+                    {"kind": "remote_id", "value": "remote-photo-123"},
+                    {"kind": "remote_unique_id", "value": "unique-photo-123"},
+                ],
+                "local_path": None,
+                "mime_type": "image/jpeg",
+                "filename": "photo.jpg",
+                "size_bytes": 17,
+                "checksums": {},
+                "download_status": "not_requested",
+                "last_error": None,
+                "observed_at": "2026-04-02T10:00:00Z",
+                "raw_ref": None,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class RemoteFallbackClient(FakeTelegramArtifactClient):
+        def download_file(
+            self, file_id: int, *, timeout_seconds: float = 120.0
+        ) -> dict[str, object] | None:
+            del timeout_seconds
+            self.requests.append(file_id)
+            raise RuntimeError("File not found")
+
+        def download_remote_file(
+            self,
+            remote_id: str,
+            *,
+            kind: str,
+            timeout_seconds: float = 120.0,
+        ) -> dict[str, object] | None:
+            del timeout_seconds
+            self.remote_requests.append((remote_id, kind))
+            return {
+                "id": 9000,
+                "local": {"path": str(downloaded_file), "is_downloading_completed": True},
+            }
+
+    client = RemoteFallbackClient({})
+    result = download_telegram_artifacts(
+        paths,
+        date="2026-04-02",
+        policy="download-source-native",
+        client=client,
+    )
+
+    assert result.downloaded == 1
+    assert client.requests == [1258]
+    assert client.remote_requests == [("remote-photo-123", "photo")]
+
+
+def test_download_telegram_artifacts_dry_run_does_not_call_tdlib(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    artifact_path = paths.artifact_metadata_path("telegram", "2026-04-02")
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "artifact_id": "artifact_test",
+                "source": "telegram",
+                "kind": "photo",
+                "account": "personal",
+                "source_object_id": "1258",
+                "event_ids": ["evt_test"],
+                "remote_locators": [{"kind": "remote_id", "value": "remote-photo-123"}],
+                "local_path": None,
+                "mime_type": "image/jpeg",
+                "filename": "photo.jpg",
+                "size_bytes": 17,
+                "checksums": {},
+                "download_status": "not_requested",
+                "last_error": None,
+                "observed_at": "2026-04-02T10:00:00Z",
+                "raw_ref": None,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class FailingClient(FakeTelegramArtifactClient):
+        def download_file(
+            self, file_id: int, *, timeout_seconds: float = 120.0
+        ) -> dict[str, object] | None:
+            raise AssertionError("dry run should not call download_file")
+
+        def download_remote_file(
+            self,
+            remote_id: str,
+            *,
+            kind: str,
+            timeout_seconds: float = 120.0,
+        ) -> dict[str, object] | None:
+            raise AssertionError("dry run should not call download_remote_file")
+
+    client = FailingClient({})
+    result = download_telegram_artifacts(
+        paths,
+        date="2026-04-02",
+        policy="download-source-native",
+        client=client,
+        dry_run=True,
+    )
+
+    assert result.would_download == 1
+    assert result.failed == 0
+
+
+def test_tdlib_client_download_remote_file_tries_unknown_then_typed(tmp_path) -> None:
+    class RequestTransport:
+        def __init__(self) -> None:
+            self.sent: list[dict] = []
+            self.responses: list[dict] = []
+
+        def send(self, query: dict) -> None:
+            self.sent.append(query)
+            extra = query.get("@extra")
+            if query.get("@type") == "getRemoteFile" and "file_type" not in query:
+                self.responses.append(
+                    {"@type": "error", "@extra": extra, "message": "need file type"}
+                )
+            elif query.get("@type") == "getRemoteFile":
+                self.responses.append({"@type": "file", "@extra": extra, "id": 42})
+            elif query.get("@type") == "getFile":
+                self.responses.append(
+                    {
+                        "@type": "file",
+                        "@extra": extra,
+                        "id": 42,
+                        "local": {
+                            "path": str(tmp_path / "remote.bin"),
+                            "is_downloading_completed": True,
+                        },
+                    }
+                )
+            elif query.get("@type") == "downloadFile":
+                self.responses.append(
+                    {
+                        "@type": "file",
+                        "@extra": extra,
+                        "id": 42,
+                        "local": {
+                            "path": str(tmp_path / "remote.bin"),
+                            "is_downloading_completed": True,
+                        },
+                    }
+                )
+
+        def receive(self, timeout: float) -> dict | None:
+            del timeout
+            if not self.responses:
+                return None
+            return self.responses.pop(0)
+
+        def execute(self, query: dict) -> dict | None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    transport = RequestTransport()
+    client = TdlibTelegramClient(
+        transport=transport,
+        settings=_tdlib_settings(tmp_path),
+        auth_timeout_seconds=1.0,
+        receive_timeout_seconds=0.01,
+    )
+    client._ready = True  # type: ignore[attr-defined]
+
+    result = client.download_remote_file("remote-photo-123", kind="photo")
+
+    assert result is not None
+    remote_queries = [query for query in transport.sent if query.get("@type") == "getRemoteFile"]
+    assert [
+        {key: value for key, value in query.items() if key != "@extra"} for query in remote_queries
+    ] == [
+        {"@type": "getRemoteFile", "remote_file_id": "remote-photo-123"},
+        {
+            "@type": "getRemoteFile",
+            "remote_file_id": "remote-photo-123",
+            "file_type": {"@type": "fileTypePhoto"},
+        },
+    ]
+
+
+def test_tdlib_json_transport_sets_global_log_verbosity_before_client_create(monkeypatch) -> None:
+    import recall.connectors.telegram.tdlib as tdlib_module
+
+    calls: list[tuple[str, object]] = []
+
+    class FakeFunction:
+        def __init__(self, name: str, return_value=None):
+            self.name = name
+            self.return_value = return_value
+            self.argtypes = None
+            self.restype = None
+
+        def __call__(self, *args):
+            calls.append((self.name, args))
+            return self.return_value
+
+    class FakeLibrary:
+        def __init__(self) -> None:
+            self.td_set_log_verbosity_level = FakeFunction("td_set_log_verbosity_level")
+            self.td_json_client_create = FakeFunction("td_json_client_create", 123)
+            self.td_json_client_send = FakeFunction("td_json_client_send")
+            self.td_json_client_receive = FakeFunction("td_json_client_receive", None)
+            self.td_json_client_execute = FakeFunction(
+                "td_json_client_execute",
+                b'{"@type":"ok"}',
+            )
+            self.td_json_client_destroy = FakeFunction("td_json_client_destroy")
+
+    monkeypatch.setattr(tdlib_module.ctypes, "CDLL", lambda path: FakeLibrary())
+
+    transport = TdlibJsonTransport(library_path="/tmp/libtdjson.so", log_verbosity_level=0)
+    transport.close()
+
+    assert calls[0] == ("td_set_log_verbosity_level", (0,))
+    execute_calls = [entry for entry in calls if entry[0] == "td_json_client_execute"]
+    assert len(execute_calls) == 2
+    first_payload = execute_calls[0][1][1].decode("utf-8")
+    second_payload = execute_calls[1][1][1].decode("utf-8")
+    assert '"setLogStream"' in first_payload
+    assert '"logStreamEmpty"' in first_payload
+    assert '"setLogVerbosityLevel"' in second_payload
 
 
 def test_file_telegram_client_filters_updates_after_cursor() -> None:

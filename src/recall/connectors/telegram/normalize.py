@@ -211,17 +211,76 @@ def _event_id(account: str, chat_id: int | str, message_id: int | str) -> str:
     return f"evt_{hashlib.sha256(payload).hexdigest()[:20]}"
 
 
-def _file_details(content: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+def _best_photo_file(photo: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    sizes = photo.get("sizes")
+    if not isinstance(sizes, list):
+        return None
+
+    candidates: list[tuple[tuple[int, int, int], dict[str, Any], dict[str, Any]]] = []
+    for size in sizes:
+        if not isinstance(size, dict):
+            continue
+        file_value = size.get("photo")
+        file_object: dict[str, Any] = file_value if isinstance(file_value, dict) else {}
+        if not file_object:
+            continue
+        expected_size = int(file_object.get("expected_size") or 0)
+        width = int(size.get("width") or 0)
+        height = int(size.get("height") or 0)
+        candidates.append(((expected_size, width * height, max(width, height)), file_object, size))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: item[0])
+    _, file_object, size = candidates[-1]
+    return file_object, size
+
+
+def _file_details(content: dict[str, Any]) -> tuple[str, dict[str, Any], dict[str, Any]] | None:
     content_type = str(content.get("@type") or "")
     if content_type == "messagePhoto":
         photo = content.get("photo") or {}
-        return ("photo", photo) if isinstance(photo, dict) else None
+        if not isinstance(photo, dict):
+            return None
+        best = _best_photo_file(photo)
+        if best is not None:
+            file_object, size = best
+            metadata = {
+                "filename": None,
+                "mime_type": None,
+                "size_bytes": file_object.get("expected_size"),
+                "width": size.get("width"),
+                "height": size.get("height"),
+            }
+            return ("photo", file_object, metadata)
+        return ("photo", photo, {}) if isinstance(photo, dict) else None
     if content_type == "messageDocument":
         document = content.get("document") or {}
-        return ("document", document) if isinstance(document, dict) else None
+        if not isinstance(document, dict):
+            return None
+        nested = document.get("document")
+        if isinstance(nested, dict):
+            metadata = {
+                "filename": document.get("file_name"),
+                "mime_type": document.get("mime_type"),
+                "size_bytes": nested.get("expected_size") or document.get("size"),
+            }
+            return ("document", nested, metadata)
+        return ("document", document, {})
     if content_type == "messageVoiceNote":
         voice_note = content.get("voice_note") or {}
-        return ("voice_note", voice_note) if isinstance(voice_note, dict) else None
+        if not isinstance(voice_note, dict):
+            return None
+        nested = voice_note.get("voice")
+        if isinstance(nested, dict):
+            metadata = {
+                "filename": voice_note.get("file_name"),
+                "mime_type": voice_note.get("mime_type"),
+                "size_bytes": nested.get("expected_size") or voice_note.get("size"),
+            }
+            return ("voice_note", nested, metadata)
+        return ("voice_note", voice_note, {})
     return None
 
 
@@ -239,7 +298,7 @@ def _artifact_records(
     if file_details is None:
         return []
 
-    kind, file_object = file_details
+    kind, file_object, metadata = file_details
     file_id = str(
         file_object.get("id") or file_object.get("remote", {}).get("id") or f"line-{line_number}"
     )
@@ -275,9 +334,15 @@ def _artifact_records(
             event_ids=[event_id],
             remote_locators=locators,
             local_path=None,
-            mime_type=file_object.get("mime_type"),
-            filename=file_object.get("file_name"),
-            size_bytes=int(file_object["size"]) if file_object.get("size") is not None else None,
+            mime_type=metadata.get("mime_type") or file_object.get("mime_type"),
+            filename=metadata.get("filename") or file_object.get("file_name"),
+            size_bytes=(
+                int(metadata["size_bytes"])
+                if metadata.get("size_bytes") is not None
+                else int(file_object["size"])
+                if file_object.get("size") is not None
+                else None
+            ),
             checksums={},
             download_status="not_requested",
             observed_at=timestamp,
