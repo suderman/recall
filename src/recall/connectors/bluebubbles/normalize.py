@@ -168,7 +168,7 @@ def normalize_bluebubbles_day(paths: RecallPaths, *, date: str) -> tuple[Path, P
     artifacts: list[NormalizedArtifact] = []
 
     for row in rows:
-        if row.get("event_type") != "new-message":
+        if row.get("event_type") not in {"new-message", "historical-message"}:
             continue
 
         data = _message_data(row)

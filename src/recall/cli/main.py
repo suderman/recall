@@ -9,6 +9,8 @@ from recall.cli.artifacts import download_slack_artifact_bytes, show_artifacts
 from recall.cli.events import show_events
 from recall.config import resolve_root
 from recall.connectors.bluebubbles.cli import (
+    export_bluebubbles_history_bundle,
+    import_bluebubbles_export_bundle,
     normalize_bluebubbles,
     serve_bluebubbles,
     sync_bluebubbles_entities,
@@ -33,6 +35,8 @@ entities_sync_app = typer.Typer(help="Sync source identities into SQLite.")
 state_app = typer.Typer(help="Inspect operational connector state.")
 state_show_app = typer.Typer(help="Show stored connector state.")
 bluebubbles_capture_app = typer.Typer(help="BlueBubbles capture commands.")
+import_app = typer.Typer(help="Import historical export bundles.")
+export_app = typer.Typer(help="Export source-native history bundles.")
 
 app.add_typer(capture_app, name="capture")
 app.add_typer(normalize_app, name="normalize")
@@ -40,6 +44,8 @@ app.add_typer(events_app, name="events")
 app.add_typer(artifacts_app, name="artifacts")
 app.add_typer(entities_app, name="entities")
 app.add_typer(state_app, name="state")
+app.add_typer(import_app, name="import")
+app.add_typer(export_app, name="export")
 entities_app.add_typer(entities_sync_app, name="sync")
 state_app.add_typer(state_show_app, name="show")
 artifacts_app.add_typer(artifacts_download_app, name="download")
@@ -115,6 +121,8 @@ artifacts_download_app.command("slack")(download_slack_artifact_bytes)
 entities_sync_app.command("slack")(sync_slack_entities)
 entities_sync_app.command("bluebubbles")(sync_bluebubbles_entities)
 state_show_app.command("slack")(show_slack_state)
+import_app.command("bluebubbles-export")(import_bluebubbles_export_bundle)
+export_app.command("bluebubbles-history")(export_bluebubbles_history_bundle)
 
 
 def main() -> None:

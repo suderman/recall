@@ -10,6 +10,8 @@ from recall.connectors.bluebubbles.config import bluebubbles_config_path, load_b
 from recall.connectors.bluebubbles.entities import (
     sync_bluebubbles_entities as sync_bluebubbles_entities_for_date,
 )
+from recall.connectors.bluebubbles.exporter import export_bluebubbles_history
+from recall.connectors.bluebubbles.importer import import_bluebubbles_export
 from recall.connectors.bluebubbles.normalize import normalize_bluebubbles_day
 from recall.connectors.bluebubbles.webhook import create_bluebubbles_webhook_app
 from recall.storage.paths import RecallPaths
@@ -93,3 +95,68 @@ def sync_bluebubbles_entities(
     typer.echo(f"Synced BlueBubbles entities for {date}")
     typer.echo(f"identities={result.identities_synced}")
     typer.echo(f"identity_aliases={result.aliases_synced}")
+
+
+def import_bluebubbles_export_bundle(
+    export_path: Path = typer.Argument(..., exists=True, resolve_path=True),
+    account: str | None = typer.Option(None, "--account", help="Account label to record."),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+) -> None:
+    """Import a BlueBubbles historical export bundle into raw storage."""
+
+    paths = _paths_for(root)
+    paths.ensure_directories()
+    config = load_bluebubbles_config(paths)
+    result = import_bluebubbles_export(
+        paths,
+        export_path=export_path,
+        account=account or config.account,
+    )
+    typer.echo("mode=import")
+    typer.echo(f"import_id={result.import_id}")
+    typer.echo(f"import_dir={result.import_dir}")
+    typer.echo(f"messages_imported={result.messages_imported}")
+    typer.echo("dates_written=" + (",".join(result.dates_written) if result.dates_written else "-"))
+    typer.echo(
+        "next_step=run 'recall normalize bluebubbles --date YYYY-MM-DD' for each imported date"
+    )
+
+
+def export_bluebubbles_history_bundle(
+    output_dir: Path = typer.Argument(..., resolve_path=True),
+    from_date: str = typer.Option(..., "--from", help="Start date in YYYY-MM-DD format."),
+    to_date: str = typer.Option(..., "--to", help="End date in YYYY-MM-DD format."),
+    messages_db: Path = typer.Option(
+        Path("~/Library/Messages/chat.db"),
+        "--messages-db",
+        resolve_path=True,
+        help="Path to the local macOS Messages database on the export machine.",
+    ),
+    export_id: str | None = typer.Option(None, "--export-id", help="Stable export identifier."),
+) -> None:
+    """Export historical BlueBubbles-compatible message history from the local Messages DB."""
+
+    result = export_bluebubbles_history(
+        messages_db=messages_db,
+        output_dir=output_dir,
+        from_date=from_date,
+        to_date=to_date,
+        export_id=export_id,
+    )
+    typer.echo("mode=export")
+    typer.echo(f"messages_db={messages_db.expanduser().resolve()}")
+    typer.echo(f"output_dir={result.output_dir}")
+    typer.echo(f"manifest={result.manifest_path}")
+    typer.echo(f"messages={result.messages_path}")
+    typer.echo(f"message_count={result.message_count}")
+    typer.echo(
+        "next_step=copy this export bundle to Recall and run "
+        "'recall import bluebubbles-export <path>'"
+    )

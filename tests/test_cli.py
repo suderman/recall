@@ -360,6 +360,33 @@ def test_capture_bluebubbles_serve_reports_webhook_url_hint(tmp_path, monkeypatc
     )
 
 
+def test_import_bluebubbles_export_reports_next_steps(tmp_path) -> None:
+    export_dir = tmp_path / "bluebubbles-export"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    (export_dir / "manifest.json").write_text(
+        '{"export_id":"bb_hist_20260331","source":"bluebubbles","schema_version":1}',
+        encoding="utf-8",
+    )
+    (export_dir / "messages.jsonl").write_text(
+        (
+            '{"guid":"msg-1","dateCreated":1774978267000,'
+            '"text":"Historical hello","chatGuid":"iMessage;+15551234567",'
+            '"handle":"+15551234567","participants":["+15551234567"]}\n'
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["import", "bluebubbles-export", str(export_dir), "--root", str(tmp_path)],
+    )
+
+    assert result.exit_code == 0
+    assert "mode=import" in result.stdout
+    assert "messages_imported=1" in result.stdout
+    assert "recall normalize bluebubbles --date YYYY-MM-DD" in result.stdout
+
+
 def test_entities_sync_slack_persists_identity_rows(tmp_path) -> None:
     paths = _copy_slack_fixture_capture(tmp_path)
 

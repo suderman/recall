@@ -417,6 +417,7 @@ These should import archives into raw storage and then normalize from there.
 - always-on webhook receiver
 - append raw events
 - normalize downstream
+- historical backfill via explicit export import, not webhook replay
 
 ### 11.4 Email
 - query notmuch directly at synthesis or normalization time
@@ -439,6 +440,7 @@ Intended command family:
 ```text
 recall capture <source> ...
 recall backfill <source> ...
+recall import <source-export> ...
 recall normalize <source> ...
 recall events show ...
 recall entities ...
@@ -449,6 +451,7 @@ Guidelines:
 - CLI commands should do one thing clearly
 - source-specific commands should live at the edge
 - derived-view commands should consume normalized data, not call raw connectors directly
+- export imports should preserve the original bundle untouched before normalization
 
 ## 13. Project layout
 

@@ -34,6 +34,18 @@ def raw_capture_paths(paths: RecallPaths, date: str) -> tuple[Path, Path]:
     return raw_dir, raw_dir / "events.jsonl"
 
 
+def append_bluebubbles_envelope(
+    paths: RecallPaths,
+    *,
+    date: str,
+    envelope: dict[str, Any],
+) -> BlueBubblesCaptureResult:
+    paths.ensure_directories()
+    raw_dir, events_path = raw_capture_paths(paths, date)
+    write_jsonl(events_path, [envelope], append=True)
+    return BlueBubblesCaptureResult(date=date, raw_dir=raw_dir, events_path=events_path)
+
+
 def append_bluebubbles_event(
     paths: RecallPaths,
     *,
@@ -49,8 +61,8 @@ def append_bluebubbles_event(
         "received_at": timestamp,
         "source": "bluebubbles",
         "account": account,
+        "capture_mode": "webhook",
         "event_type": payload.get("type", "unknown"),
         "payload": payload,
     }
-    write_jsonl(events_path, [envelope], append=True)
-    return BlueBubblesCaptureResult(date=date, raw_dir=raw_dir, events_path=events_path)
+    return append_bluebubbles_envelope(paths, date=date, envelope=envelope)

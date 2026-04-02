@@ -76,5 +76,8 @@ class RecallPaths:
     def raw_capture_dir(self, source: str, date: str) -> Path:
         return self.raw / source / date
 
+    def raw_import_dir(self, source: str, import_id: str) -> Path:
+        return self.raw / source / "imports" / import_id
+
     def relative_to_root(self, path: Path) -> str:
         return path.resolve().relative_to(self.root).as_posix()
