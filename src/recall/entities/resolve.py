@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
 
 import sqlalchemy as sa
@@ -8,9 +9,9 @@ from recall.entities.storage import upsert_resolutions
 from recall.storage.db import (
     aliases,
     create_engine,
+    ensure_schema,
     identities,
     identity_aliases,
-    metadata,
     persons,
     resolutions,
 )
@@ -64,14 +65,22 @@ def _resolution_row(
     method: str,
     evidence: list[str],
     created_at: str,
+    valid_from: str | None = None,
+    valid_to: str | None = None,
 ) -> dict[str, object]:
     resolution_id = f"res_{identity_id}_{person_id}_{method}".replace("@", "at_")
+    if valid_from:
+        resolution_id += f"_{valid_from}"
+    if valid_to:
+        resolution_id += f"_{valid_to}"
     return {
         "resolution_id": resolution_id,
         "identity_id": identity_id,
         "person_id": person_id,
         "confidence": confidence,
         "method": method,
+        "valid_from": valid_from,
+        "valid_to": valid_to,
         "evidence": evidence,
         "created_at": created_at,
     }
@@ -123,7 +132,7 @@ def match_entities(paths: RecallPaths) -> EntityMatchResult:
     automatic_rows: list[dict[str, object]] = []
 
     engine = create_engine(paths)
-    metadata.create_all(engine)
+    ensure_schema(engine)
 
     with engine.begin() as connection:
         unresolved = connection.execute(
@@ -148,7 +157,8 @@ def match_entities(paths: RecallPaths) -> EntityMatchResult:
             ).first()
             if row is None:
                 continue
-            _bind_identity_to_person(connection, row.identity_id, rule.person_id)
+            if rule.valid_from is None and rule.valid_to is None:
+                _bind_identity_to_person(connection, row.identity_id, rule.person_id)
             manually_bound_identity_ids.add(row.identity_id)
             manual_rows.append(
                 _resolution_row(
@@ -158,6 +168,8 @@ def match_entities(paths: RecallPaths) -> EntityMatchResult:
                     method=rule.method,
                     evidence=rule.evidence or ["Applied manual identity resolution rule"],
                     created_at=row.created_at,
+                    valid_from=rule.valid_from,
+                    valid_to=rule.valid_to,
                 )
             )
 

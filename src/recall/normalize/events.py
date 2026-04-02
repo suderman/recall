@@ -23,7 +23,9 @@ class NormalizedEvent:
     conversation_label: str | None = None
     thread_id: str | None = None
     sender_identity_id: str | None = None
+    sender_person_id: str | None = None
     participant_identity_ids: list[str] = field(default_factory=list)
+    participant_person_ids: list[str] = field(default_factory=list)
     text: str | None = None
     source_urls: list[str] = field(default_factory=list)
     artifact_ids: list[str] = field(default_factory=list)

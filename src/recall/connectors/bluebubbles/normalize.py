@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from recall.connectors.bluebubbles.capture import raw_capture_paths
+from recall.entities.enrich import enrich_events_with_people
 from recall.normalize.artifacts import NormalizedArtifact, RemoteLocator
 from recall.normalize.events import NormalizedEvent, RawReference
 from recall.storage.jsonl import write_artifact_metadata, write_normalized_events
@@ -239,6 +240,7 @@ def normalize_bluebubbles_day(paths: RecallPaths, *, date: str) -> tuple[Path, P
             )
         )
 
+    enrich_events_with_people(paths, events)
     artifact_path = write_artifact_metadata(
         paths, source="bluebubbles", date=date, artifacts=artifacts
     )

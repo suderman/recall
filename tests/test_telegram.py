@@ -17,8 +17,8 @@ from recall.connectors.telegram.config import TelegramSourceConfig
 from recall.connectors.telegram.entities import sync_telegram_entities
 from recall.connectors.telegram.normalize import normalize_telegram_day
 from recall.connectors.telegram.tdlib import (
-    TdlibJsonTransport,
     TdlibAuthSettings,
+    TdlibJsonTransport,
     TdlibTelegramClient,
     build_tdlib_auth_settings,
 )

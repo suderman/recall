@@ -11,13 +11,13 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 from uuid import uuid4
 
+from recall.connectors.telegram.capture import current_timestamp
 from recall.connectors.telegram.client import TelegramCaptureClient, TelegramUpdate
 from recall.connectors.telegram.config import (
     TelegramSourceConfig,
     read_config_env,
     resolve_tdlib_state_dir,
 )
-from recall.connectors.telegram.capture import current_timestamp
 from recall.storage.paths import RecallPaths
 
 AUTH_TIMEOUT_SECONDS = 30.0

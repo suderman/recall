@@ -13,6 +13,7 @@ from recall.connectors.slack.capture import (
     parse_date,
     raw_capture_paths,
 )
+from recall.entities.enrich import enrich_events_with_people
 from recall.normalize.artifacts import NormalizedArtifact, RemoteLocator
 from recall.normalize.events import NormalizedEvent, RawReference
 from recall.storage.jsonl import write_artifact_metadata, write_normalized_events
@@ -279,5 +280,6 @@ def normalize_slack_day(paths: RecallPaths, *, date: str) -> Path:
             )
         )
 
+    enrich_events_with_people(paths, events)
     write_artifact_metadata(paths, source="slack", date=date, artifacts=artifacts)
     return write_normalized_events(paths, date, events, merge_existing=True)

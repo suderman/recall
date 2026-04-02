@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from recall.connectors.calendar.normalize import normalize_calendar_day
+from recall.entities.storage import upsert_identities, upsert_persons, upsert_resolutions
 from recall.normalize.events import NormalizedEvent
 from recall.storage.jsonl import read_jsonl, write_normalized_events
 from recall.storage.paths import RecallPaths
@@ -45,6 +46,64 @@ def test_normalize_calendar_day_writes_events_with_expected_tags(tmp_path) -> No
     overnight = by_label["Overnight Trip"]
     assert "spans_days" in overnight["tags"]
     assert overnight["date"] == "2026-03-31"
+
+
+def test_normalize_calendar_day_enriches_people_from_timestamped_resolutions(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    upsert_persons(
+        paths,
+        [
+            {
+                "person_id": "person_manager",
+                "display_name": "Manager Person",
+                "sort_name": None,
+                "notes": "",
+                "tags": [],
+                "created_at": "2026-03-31T00:00:00Z",
+            }
+        ],
+    )
+    upsert_identities(
+        paths,
+        [
+            {
+                "identity_id": "ident_email_manager_example_com",
+                "person_id": None,
+                "source": "email",
+                "kind": "email",
+                "value": "manager@example.com",
+                "label": "Email address",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T00:00:00Z",
+            }
+        ],
+    )
+    upsert_resolutions(
+        paths,
+        [
+            {
+                "resolution_id": "res_manager",
+                "identity_id": "ident_email_manager_example_com",
+                "person_id": "person_manager",
+                "confidence": "high",
+                "method": "manual_override",
+                "valid_from": "2026-01-01",
+                "valid_to": None,
+                "evidence": ["known organizer"],
+                "created_at": "2026-03-31T00:00:00Z",
+            }
+        ],
+    )
+
+    event_path = normalize_calendar_day(paths, date="2026-03-31", runner=_fixture_runner)
+
+    records = read_jsonl(event_path)
+    team_sync = next(record for record in records if record["conversation_label"] == "Team Sync")
+    assert team_sync["sender_person_id"] == "person_manager"
+    assert team_sync["participant_person_ids"] == ["person_manager"]
 
 
 def test_normalize_calendar_day_can_exclude_canceled_events(tmp_path) -> None:

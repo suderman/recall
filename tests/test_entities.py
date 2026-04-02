@@ -7,8 +7,10 @@ from pathlib import Path
 from recall.connectors.email.entities import sync_email_entities
 from recall.connectors.slack.entities import sync_slack_entities
 from recall.connectors.telegram.entities import sync_telegram_entities
+from recall.entities.enrich import enrich_events_with_people
 from recall.entities.resolve import match_entities
-from recall.entities.storage import upsert_identities, upsert_persons
+from recall.entities.storage import upsert_identities, upsert_persons, upsert_resolutions
+from recall.normalize.events import NormalizedEvent
 from recall.storage.paths import RecallPaths
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "telegram"
@@ -243,3 +245,185 @@ def test_match_entities_links_slack_user_through_synced_email_identity(tmp_path)
 
     assert slack_user == ("person_telegram_user_42",)
     assert email_identity == ("person_telegram_user_42",)
+
+
+def test_match_entities_preserves_dated_manual_resolution_windows(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    upsert_persons(
+        paths,
+        [
+            {
+                "person_id": "person_old_owner",
+                "display_name": "Old Owner",
+                "sort_name": None,
+                "notes": "",
+                "tags": [],
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+            {
+                "person_id": "person_new_owner",
+                "display_name": "New Owner",
+                "sort_name": None,
+                "notes": "",
+                "tags": [],
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+        ],
+    )
+    upsert_identities(
+        paths,
+        [
+            {
+                "identity_id": "ident_email_reused_example_com",
+                "person_id": None,
+                "source": "email",
+                "kind": "email",
+                "value": "reused@example.com",
+                "label": "Email address",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T00:00:00Z",
+            }
+        ],
+    )
+    manual_path = paths.entity_resolution_config / "manual.toml"
+    manual_path.parent.mkdir(parents=True, exist_ok=True)
+    manual_path.write_text(
+        """
+[[identity_resolution]]
+source = "email"
+kind = "email"
+value = "reused@example.com"
+person_id = "person_old_owner"
+valid_to = "2026-03-31"
+
+[[identity_resolution]]
+source = "email"
+kind = "email"
+value = "reused@example.com"
+person_id = "person_new_owner"
+valid_from = "2026-04-01"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = match_entities(paths)
+
+    assert result.manual_resolutions_applied == 2
+    with sqlite3.connect(paths.database) as connection:
+        resolutions = connection.execute(
+            "select person_id, valid_from, valid_to from resolutions "
+            "where identity_id = 'ident_email_reused_example_com' order by person_id"
+        ).fetchall()
+        identity = connection.execute(
+            "select person_id from identities where identity_id = 'ident_email_reused_example_com'"
+        ).fetchone()
+
+    assert resolutions == [
+        ("person_new_owner", "2026-04-01", None),
+        ("person_old_owner", None, "2026-03-31"),
+    ]
+    assert identity == (None,)
+
+
+def test_enrich_events_with_people_uses_event_timestamp_against_resolution_windows(
+    tmp_path,
+) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    upsert_persons(
+        paths,
+        [
+            {
+                "person_id": "person_old_owner",
+                "display_name": "Old Owner",
+                "sort_name": None,
+                "notes": "",
+                "tags": [],
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+            {
+                "person_id": "person_new_owner",
+                "display_name": "New Owner",
+                "sort_name": None,
+                "notes": "",
+                "tags": [],
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+        ],
+    )
+    upsert_identities(
+        paths,
+        [
+            {
+                "identity_id": "ident_email_reused_example_com",
+                "person_id": None,
+                "source": "email",
+                "kind": "email",
+                "value": "reused@example.com",
+                "label": "Email address",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T00:00:00Z",
+            }
+        ],
+    )
+    upsert_resolutions(
+        paths,
+        [
+            {
+                "resolution_id": "res_old",
+                "identity_id": "ident_email_reused_example_com",
+                "person_id": "person_old_owner",
+                "confidence": "high",
+                "method": "manual_override",
+                "valid_from": None,
+                "valid_to": "2026-03-31",
+                "evidence": ["before handoff"],
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+            {
+                "resolution_id": "res_new",
+                "identity_id": "ident_email_reused_example_com",
+                "person_id": "person_new_owner",
+                "confidence": "high",
+                "method": "manual_override",
+                "valid_from": "2026-04-01",
+                "valid_to": None,
+                "evidence": ["after handoff"],
+                "created_at": "2026-04-01T00:00:00Z",
+            },
+        ],
+    )
+
+    events = [
+        NormalizedEvent(
+            event_id="evt_old",
+            source="email",
+            timestamp="2026-03-31T12:00:00Z",
+            date="2026-03-31",
+            kind="email",
+            sender_identity_id="ident_email_reused_example_com",
+            participant_identity_ids=["ident_email_reused_example_com"],
+        ),
+        NormalizedEvent(
+            event_id="evt_new",
+            source="email",
+            timestamp="2026-04-02T12:00:00Z",
+            date="2026-04-02",
+            kind="email",
+            sender_identity_id="ident_email_reused_example_com",
+            participant_identity_ids=["ident_email_reused_example_com"],
+        ),
+    ]
+
+    enrich_events_with_people(paths, events)
+
+    assert events[0].sender_person_id == "person_old_owner"
+    assert events[0].participant_person_ids == ["person_old_owner"]
+    assert events[1].sender_person_id == "person_new_owner"
+    assert events[1].participant_person_ids == ["person_new_owner"]

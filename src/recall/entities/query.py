@@ -37,6 +37,8 @@ class ResolutionRecord:
     person_id: str
     confidence: str
     method: str
+    valid_from: str | None
+    valid_to: str | None
     evidence: list[str]
     created_at: str
 
@@ -90,6 +92,8 @@ def list_resolutions(paths: RecallPaths, *, person_id: str | None = None) -> lis
         resolutions.c.person_id,
         resolutions.c.confidence,
         resolutions.c.method,
+        resolutions.c.valid_from,
+        resolutions.c.valid_to,
         resolutions.c.evidence_json,
         resolutions.c.created_at,
     ).order_by(resolutions.c.person_id, resolutions.c.identity_id, resolutions.c.method)
@@ -105,6 +109,8 @@ def list_resolutions(paths: RecallPaths, *, person_id: str | None = None) -> lis
                 person_id=row.person_id,
                 confidence=row.confidence,
                 method=row.method,
+                valid_from=row.valid_from,
+                valid_to=row.valid_to,
                 evidence=json.loads(row.evidence_json),
                 created_at=row.created_at,
             )

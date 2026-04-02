@@ -10,9 +10,9 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from recall.storage.db import (
     aliases,
     create_engine,
+    ensure_schema,
     identities,
     identity_aliases,
-    metadata,
     persons,
     resolutions,
 )
@@ -25,7 +25,7 @@ def upsert_persons(paths: RecallPaths, records: Iterable[dict[str, Any]]) -> int
         return 0
 
     engine = create_engine(paths)
-    metadata.create_all(engine)
+    ensure_schema(engine)
 
     with engine.begin() as connection:
         for row in rows:
@@ -54,7 +54,7 @@ def upsert_identities(paths: RecallPaths, records: Iterable[dict[str, Any]]) -> 
         return 0
 
     engine = create_engine(paths)
-    metadata.create_all(engine)
+    ensure_schema(engine)
 
     with engine.begin() as connection:
         for row in rows:
@@ -84,7 +84,7 @@ def upsert_identity_aliases(paths: RecallPaths, records: Iterable[dict[str, Any]
         return 0
 
     engine = create_engine(paths)
-    metadata.create_all(engine)
+    ensure_schema(engine)
 
     with engine.begin() as connection:
         for row in rows:
@@ -107,7 +107,7 @@ def upsert_aliases(paths: RecallPaths, records: Iterable[dict[str, Any]]) -> int
         return 0
 
     engine = create_engine(paths)
-    metadata.create_all(engine)
+    ensure_schema(engine)
 
     with engine.begin() as connection:
         for row in rows:
@@ -124,7 +124,7 @@ def upsert_resolutions(paths: RecallPaths, records: Iterable[dict[str, Any]]) ->
         return 0
 
     engine = create_engine(paths)
-    metadata.create_all(engine)
+    ensure_schema(engine)
 
     with engine.begin() as connection:
         for row in rows:

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from recall.storage.db import connector_cursors, create_engine, metadata
+from recall.storage.db import connector_cursors, create_engine, ensure_schema
 from recall.storage.paths import RecallPaths
 
 
@@ -37,7 +37,7 @@ def get_connector_cursor(
     cursor_key: str,
 ) -> ConnectorCursor | None:
     engine = create_engine(paths)
-    metadata.create_all(engine)
+    ensure_schema(engine)
 
     with engine.connect() as connection:
         row = connection.execute(
@@ -60,7 +60,7 @@ def list_connector_cursors(
     account: str,
 ) -> list[ConnectorCursor]:
     engine = create_engine(paths)
-    metadata.create_all(engine)
+    ensure_schema(engine)
 
     with engine.connect() as connection:
         rows = connection.execute(
@@ -83,7 +83,7 @@ def set_connector_cursor(
     updated_at: str | None = None,
 ) -> ConnectorCursor:
     engine = create_engine(paths)
-    metadata.create_all(engine)
+    ensure_schema(engine)
     timestamp = updated_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     with engine.begin() as connection:

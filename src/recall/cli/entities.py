@@ -89,6 +89,8 @@ def show_resolutions(
     for row in rows:
         typer.echo(f"- {row.identity_id} -> {row.person_id}")
         typer.echo(f"  method={row.method} confidence={row.confidence}")
+        if row.valid_from or row.valid_to:
+            typer.echo(f"  valid_from={row.valid_from or '-'} valid_to={row.valid_to or '-'}")
         if row.evidence:
             typer.echo(f"  evidence={'; '.join(row.evidence)}")
 

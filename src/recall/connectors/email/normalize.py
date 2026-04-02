@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 
 from recall.connectors.email.notmuch import NotmuchRunner, load_email_messages, parse_date
+from recall.entities.enrich import enrich_events_with_people
 from recall.normalize.events import NormalizedEvent, RawReference
 from recall.storage.jsonl import write_normalized_events
 from recall.storage.paths import RecallPaths
@@ -79,4 +80,5 @@ def normalize_email_day(
             )
         )
 
+    enrich_events_with_people(paths, events)
     return write_normalized_events(paths, date, events, merge_existing=True)
