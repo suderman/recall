@@ -308,6 +308,95 @@ to `config/sources/bluebubbles.toml`, then point the BlueBubbles server at the
 Recall webhook URL on your LAN. Use the Recall host's reachable LAN IP, not
 `0.0.0.0`, for example `http://10.1.0.6:8042/bluebubbles/webhook?token=...`.
 
+Configure Telegram TDLib capture by copying `config/sources/telegram.toml.example`
+to `config/sources/telegram.toml`, then export the configured environment
+variables before running any `recall capture telegram tdlib-*` command.
+
+Telegram TDLib setup steps:
+
+1. Create or sign into a Telegram account with the phone number you want Recall
+   to capture.
+2. Open `https://my.telegram.org`, sign in with that phone number, then open
+   `API development tools`.
+3. Create an application there if you have not already. Telegram will show you
+   an `api_id` and `api_hash` for that app.
+4. Export those values into your shell as `TELEGRAM_API_ID` and
+   `TELEGRAM_API_HASH`.
+5. Export the same login phone number as `TELEGRAM_PHONE_NUMBER` in
+   international format, for example `+15551234567`.
+6. On first login, TDLib will ask Telegram to send a one-time login code.
+   Recall prompts for that code interactively in the terminal by default, so
+   `TELEGRAM_AUTH_CODE` is optional for normal manual runs.
+7. If the Telegram account has two-step verification enabled, also export the
+   password as `TELEGRAM_AUTH_PASSWORD`, or enter it when Recall prompts.
+8. Make sure Recall can find `libtdjson`. In the Nix dev shell this is exported
+   automatically as `TELEGRAM_TDLIB_LIBRARY_PATH`. Outside Nix, either export
+   that env var yourself or set `tdlib_library_path` in
+   `config/sources/telegram.toml`.
+
+Example shell setup:
+
+```bash
+export TELEGRAM_API_ID="12345678"
+export TELEGRAM_API_HASH="your-telegram-api-hash"
+export TELEGRAM_PHONE_NUMBER="+15551234567"
+
+# optional: preseed the first-login code for unattended runs
+export TELEGRAM_AUTH_CODE="12345"
+
+# only needed if Telegram two-step verification is enabled
+export TELEGRAM_AUTH_PASSWORD="your-telegram-password"
+```
+
+If you are using `nix develop`, you should not need to set
+`TELEGRAM_TDLIB_LIBRARY_PATH` manually. The shell now exports it for you.
+
+Once those are set, start the daemon with:
+
+```bash
+nix develop -c recall capture telegram tdlib-daemon
+```
+
+Useful Telegram capture commands:
+
+```bash
+nix develop -c recall capture telegram tdlib-once
+nix develop -c recall capture telegram tdlib-run --max-updates 50
+nix develop -c recall capture telegram tdlib-daemon
+nix develop -c recall state show telegram
+```
+
+After capture writes raw updates, normalize and sync identities with:
+
+```bash
+nix develop -c recall normalize telegram --date YYYY-MM-DD
+nix develop -c recall entities sync telegram --date YYYY-MM-DD
+```
+
+To keep Telegram capture running outside an interactive shell, use the sample
+systemd user unit at `examples/systemd/recall-telegram-tdlib.service`.
+
+```bash
+mkdir -p ~/.config/systemd/user ~/.config/recall
+cp examples/systemd/recall-telegram-tdlib.service ~/.config/systemd/user/
+```
+
+Create `~/.config/recall/telegram.env` with your Telegram values:
+
+```bash
+TELEGRAM_API_ID=12345678
+TELEGRAM_API_HASH=your-telegram-api-hash
+TELEGRAM_PHONE_NUMBER=+15551234567
+```
+
+Then enable and follow the service:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now recall-telegram-tdlib.service
+journalctl --user -u recall-telegram-tdlib.service -f
+```
+
 To enable live BlueBubbles attachment downloads on `kit`, also set:
 - `server_url` to the BlueBubbles server on `bub`
 - `password_env_var` to an env var that contains the BlueBubbles server password
@@ -367,7 +456,7 @@ recall events show --date 2026-03-31
 Run the test suite:
 
 ```bash
-python -m pytest
+nix develop -c pytest
 ```
 
 ## Long-term goals

@@ -575,6 +575,149 @@ def test_capture_telegram_tdlib_run_reports_tdlib_transport(tmp_path, monkeypatc
     assert "captured_updates=2" in result.stdout
 
 
+def test_capture_telegram_tdlib_daemon_uses_stored_cursor(tmp_path, monkeypatch) -> None:
+    import recall.connectors.telegram.cli as telegram_cli
+    from recall.storage.paths import RecallPaths
+    from recall.storage.state import set_connector_cursor
+
+    paths = RecallPaths.from_root(tmp_path)
+    paths.ensure_directories()
+    set_connector_cursor(
+        paths,
+        source="telegram",
+        account="personal",
+        cursor_key="last_update_id",
+        cursor_value="12345",
+        updated_at="2026-03-31T18:00:00Z",
+    )
+
+    class FakeClient:
+        def close(self) -> None:
+            return None
+
+    class FakeTransport:
+        def close(self) -> None:
+            return None
+
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        telegram_cli,
+        "build_tdlib_auth_settings",
+        lambda *args, **kwargs: SimpleNamespace(library_path=None, log_verbosity_level=0),
+    )
+    monkeypatch.setattr(telegram_cli, "TdlibJsonTransport", lambda *args, **kwargs: FakeTransport())
+    monkeypatch.setattr(
+        telegram_cli,
+        "TdlibTelegramClient",
+        lambda *args, **kwargs: FakeClient(),
+    )
+
+    calls: list[int | None] = []
+
+    def fake_capture_updates(*args, **kwargs):
+        del args
+        calls.append(kwargs["after_update_id"])
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            captured_updates=0, dates_written=[], last_update_id=None, cursor=None
+        )
+
+    monkeypatch.setattr(telegram_cli, "capture_telegram_updates", fake_capture_updates)
+    monkeypatch.setattr(telegram_cli.time, "sleep", lambda seconds: None)
+
+    result = runner.invoke(
+        app,
+        [
+            "capture",
+            "telegram",
+            "tdlib-daemon",
+            "--root",
+            str(tmp_path),
+            "--max-cycles",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [12345]
+    assert "mode=tdlib-daemon" in result.stdout
+    assert "start_after_update_id=12345" in result.stdout
+    assert "cycle=1 captured_updates=0 last_update_id=-" in result.stdout
+
+
+def test_capture_telegram_tdlib_daemon_advances_cursor_between_cycles(
+    tmp_path, monkeypatch
+) -> None:
+    import recall.connectors.telegram.cli as telegram_cli
+
+    class FakeClient:
+        def close(self) -> None:
+            return None
+
+    class FakeTransport:
+        def close(self) -> None:
+            return None
+
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        telegram_cli,
+        "build_tdlib_auth_settings",
+        lambda *args, **kwargs: SimpleNamespace(library_path=None, log_verbosity_level=0),
+    )
+    monkeypatch.setattr(telegram_cli, "TdlibJsonTransport", lambda *args, **kwargs: FakeTransport())
+    monkeypatch.setattr(
+        telegram_cli,
+        "TdlibTelegramClient",
+        lambda *args, **kwargs: FakeClient(),
+    )
+
+    responses = [(2, 200), (0, None)]
+    calls: list[int | None] = []
+
+    def fake_capture_updates(*args, **kwargs):
+        del args
+        calls.append(kwargs["after_update_id"])
+        captured_updates, last_update_id = responses.pop(0)
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            captured_updates=captured_updates,
+            dates_written=["2026-03-31"] if captured_updates else [],
+            last_update_id=last_update_id,
+            cursor=None,
+        )
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(telegram_cli, "capture_telegram_updates", fake_capture_updates)
+    monkeypatch.setattr(telegram_cli.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    result = runner.invoke(
+        app,
+        [
+            "capture",
+            "telegram",
+            "tdlib-daemon",
+            "--root",
+            str(tmp_path),
+            "--after-update-id",
+            "100",
+            "--max-cycles",
+            "2",
+            "--idle-sleep-seconds",
+            "0.5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [100, 200]
+    assert sleeps == [0.5]
+    assert "cycle=1 captured_updates=2 last_update_id=200" in result.stdout
+    assert "cycle=2 captured_updates=0 last_update_id=-" in result.stdout
+
+
 def test_entities_sync_telegram_persists_identity_rows(tmp_path) -> None:
     paths = _copy_telegram_fixture_capture(tmp_path)
 

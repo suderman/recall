@@ -31,11 +31,17 @@
           version = "0.1.0";
           pyproject = true;
           src = ./.;
+          nativeBuildInputs = [ pkgs.makeWrapper ];
           build-system = with pythonPackages; [
             setuptools
             wheel
           ];
           dependencies = runtimeDeps;
+          postFixup = ''
+            wrapProgram "$out/bin/recall" \
+              --set-default TELEGRAM_TDLIB_LIBRARY_PATH "${pkgs.tdlib}/lib/libtdjson.so" \
+              --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath [ pkgs.tdlib ]}"
+          '';
           meta = {
             description = "Recall command-line interface";
             mainProgram = "recall";
@@ -53,12 +59,15 @@
             pythonEnv
             self.packages.${system}.default
             pkgs.sqlite
+            pkgs.tdlib
             pkgs.uv
           ];
 
           shellHook = ''
             export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
             export RECALL_ROOT="$PWD"
+            export TELEGRAM_TDLIB_LIBRARY_PATH="${pkgs.tdlib}/lib/libtdjson.so"
+            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.tdlib ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           '';
         };
       });

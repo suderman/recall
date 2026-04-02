@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import ctypes
 import json
+import os
 import time
 from ctypes.util import find_library
 from dataclasses import dataclass
+from getpass import getpass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from recall.connectors.telegram.client import TelegramCaptureClient, TelegramUpdate
 from recall.connectors.telegram.config import (
@@ -32,6 +34,7 @@ class TdlibAuthSettings:
     library_path: str | None = None
     code: str | None = None
     password: str | None = None
+    log_verbosity_level: int = 0
     use_test_dc: bool = False
     system_language_code: str = "en"
     device_model: str = "Recall"
@@ -88,11 +91,17 @@ def build_tdlib_auth_settings(
         library_path=config.tdlib_library_path,
         code=read_config_env(config.code_env_var),
         password=read_config_env(config.password_env_var),
+        log_verbosity_level=config.tdlib_log_verbosity_level,
     )
 
 
 class TdlibJsonTransport:
-    def __init__(self, *, library_path: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        library_path: str | None = None,
+        log_verbosity_level: int = 0,
+    ) -> None:
         resolved_library = library_path or find_library("tdjson")
         if not resolved_library:
             raise RuntimeError(
@@ -111,6 +120,12 @@ class TdlibJsonTransport:
         self._client = self._library.td_json_client_create()
         if not self._client:
             raise RuntimeError("Failed to create TDLib client")
+        self.execute(
+            {
+                "@type": "setLogVerbosityLevel",
+                "new_verbosity_level": int(log_verbosity_level),
+            }
+        )
 
     def _encode(self, query: dict[str, Any]) -> bytes:
         return json.dumps(query, ensure_ascii=True, sort_keys=True).encode("utf-8")
@@ -149,6 +164,8 @@ class TdlibTelegramClient(TelegramCaptureClient):
         settings: TdlibAuthSettings,
         auth_timeout_seconds: float = AUTH_TIMEOUT_SECONDS,
         receive_timeout_seconds: float = DEFAULT_RECEIVE_TIMEOUT_SECONDS,
+        prompt_callback: Callable[[str, bool], str] | None = None,
+        is_interactive: bool | None = None,
     ) -> None:
         self._transport = transport
         self._settings = settings
@@ -157,6 +174,8 @@ class TdlibTelegramClient(TelegramCaptureClient):
         self._ready = False
         self._chat_cache: dict[int, dict[str, Any]] = {}
         self._user_cache: dict[int, dict[str, Any]] = {}
+        self._prompt_callback = prompt_callback or _default_prompt_callback
+        self._is_interactive = os.isatty(0) if is_interactive is None else is_interactive
 
     def close(self) -> None:
         self._transport.close()
@@ -255,26 +274,35 @@ class TdlibTelegramClient(TelegramCaptureClient):
             )
             return
         if state_type == "authorizationStateWaitCode":
-            if not self._settings.code:
+            if not self._settings.code and not self._is_interactive:
                 raise RuntimeError(
-                    "TDLib requires an authentication code. Set TELEGRAM_AUTH_CODE or code_env_var."
+                    "TDLib requires an authentication code. "
+                    "Set TELEGRAM_AUTH_CODE or run in an interactive terminal."
                 )
+            code = self._settings.code or self._prompt_value(
+                "Telegram sent a login code. Enter it to continue: "
+            )
             self._transport.send(
                 {
                     "@type": "checkAuthenticationCode",
-                    "code": self._settings.code,
+                    "code": code,
                 }
             )
             return
         if state_type == "authorizationStateWaitPassword":
-            if not self._settings.password:
+            if not self._settings.password and not self._is_interactive:
                 raise RuntimeError(
-                    "TDLib requires a password. Set TELEGRAM_AUTH_PASSWORD or password_env_var."
+                    "TDLib requires a password. "
+                    "Set TELEGRAM_AUTH_PASSWORD or run in an interactive terminal."
                 )
+            password = self._settings.password or self._prompt_value(
+                "Telegram account password: ",
+                hide_input=True,
+            )
             self._transport.send(
                 {
                     "@type": "checkAuthenticationPassword",
-                    "password": self._settings.password,
+                    "password": password,
                 }
             )
             return
@@ -295,12 +323,27 @@ class TdlibTelegramClient(TelegramCaptureClient):
         if chat_id is not None:
             chat = self._get_chat(int(chat_id))
             if chat is not None:
+                chat = dict(chat)
+                participant_user_ids = self._participant_user_ids(chat, message)
+                if participant_user_ids:
+                    chat["participant_user_ids"] = participant_user_ids
                 payload["chat"] = chat
 
-        users = self._users_for_message(message)
+        users = self._users_for_payload(payload, message)
         if users:
             payload["users"] = users
         return payload
+
+    def _prompt_value(self, message: str, *, hide_input: bool = False) -> str:
+        if not self._is_interactive:
+            raise RuntimeError(
+                "TDLib requires interactive authentication input. "
+                "Run in a terminal or set the corresponding TELEGRAM_AUTH_* env var."
+            )
+        value = self._prompt_callback(message, hide_input).strip()
+        if not value:
+            raise RuntimeError("TDLib authentication input cannot be empty")
+        return value
 
     def _get_chat(self, chat_id: int) -> dict[str, Any] | None:
         if chat_id in self._chat_cache:
@@ -320,14 +363,40 @@ class TdlibTelegramClient(TelegramCaptureClient):
         self._user_cache[user_id] = user
         return user
 
-    def _users_for_message(self, message: dict[str, Any]) -> list[dict[str, Any]]:
+    def _participant_user_ids(self, chat: dict[str, Any], message: dict[str, Any]) -> list[int]:
+        participant_user_ids = [int(user_id) for user_id in chat.get("participant_user_ids") or []]
+        if participant_user_ids:
+            return sorted(set(participant_user_ids))
+
+        chat_type = chat.get("type")
+        if isinstance(chat_type, dict):
+            chat_type_name = str(chat_type.get("@type") or "")
+            if chat_type_name in {"chatTypePrivate", "chatTypeSecret"} and chat_type.get("user_id"):
+                participant_user_ids.append(int(chat_type["user_id"]))
+
         sender = message.get("sender_id")
-        if not isinstance(sender, dict):
-            return []
-        if str(sender.get("@type") or "") != "messageSenderUser":
-            return []
-        user_id = sender.get("user_id")
-        if user_id is None:
-            return []
-        user = self._get_user(int(user_id))
-        return [user] if user is not None else []
+        if isinstance(sender, dict) and str(sender.get("@type") or "") == "messageSenderUser":
+            user_id = sender.get("user_id")
+            if user_id is not None:
+                participant_user_ids.append(int(user_id))
+
+        return sorted(set(participant_user_ids))
+
+    def _users_for_payload(
+        self, payload: dict[str, Any], message: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        chat_value = payload.get("chat")
+        chat: dict[str, Any] = chat_value if isinstance(chat_value, dict) else {}
+        user_ids = self._participant_user_ids(chat, message)
+        users: list[dict[str, Any]] = []
+        for user_id in user_ids:
+            user = self._get_user(user_id)
+            if user is not None:
+                users.append(user)
+        return users
+
+
+def _default_prompt_callback(message: str, hide_input: bool) -> str:
+    if hide_input:
+        return getpass(message)
+    return input(message)

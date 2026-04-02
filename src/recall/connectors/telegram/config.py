@@ -16,8 +16,10 @@ class TelegramSourceConfig:
     phone_number_env_var: str = "TELEGRAM_PHONE_NUMBER"
     code_env_var: str = "TELEGRAM_AUTH_CODE"
     password_env_var: str = "TELEGRAM_AUTH_PASSWORD"
+    tdlib_library_env_var: str = "TELEGRAM_TDLIB_LIBRARY_PATH"
     tdlib_state_dir: str = "data/state/telegram/tdlib"
     tdlib_library_path: str | None = None
+    tdlib_log_verbosity_level: int = 0
     artifact_download_policy: str = "metadata-only"
 
 
@@ -53,9 +55,15 @@ def load_telegram_config(paths: RecallPaths) -> TelegramSourceConfig:
         phone_number_env_var=str(data.get("phone_number_env_var", "TELEGRAM_PHONE_NUMBER")),
         code_env_var=str(data.get("code_env_var", "TELEGRAM_AUTH_CODE")),
         password_env_var=str(data.get("password_env_var", "TELEGRAM_AUTH_PASSWORD")),
+        tdlib_library_env_var=str(data.get("tdlib_library_env_var", "TELEGRAM_TDLIB_LIBRARY_PATH")),
         tdlib_state_dir=str(data.get("tdlib_state_dir", "data/state/telegram/tdlib")),
         tdlib_library_path=(
-            str(data.get("tdlib_library_path")) if data.get("tdlib_library_path") else None
+            str(data.get("tdlib_library_path"))
+            if data.get("tdlib_library_path")
+            else read_config_env(
+                str(data.get("tdlib_library_env_var", "TELEGRAM_TDLIB_LIBRARY_PATH"))
+            )
         ),
+        tdlib_log_verbosity_level=int(data.get("tdlib_log_verbosity_level", 0)),
         artifact_download_policy=str(data.get("artifact_download_policy", "metadata-only")),
     )

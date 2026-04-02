@@ -88,6 +88,14 @@ def _participant_identity_ids(payload: dict[str, Any], message: dict[str, Any]) 
     for user_id in chat.get("participant_user_ids") or []:
         identities.add(_user_identity_id(user_id))
 
+    chat_type_value = chat.get("type")
+    chat_type: dict[str, Any] = chat_type_value if isinstance(chat_type_value, dict) else {}
+    if (
+        chat_type.get("@type") in {"chatTypePrivate", "chatTypeSecret"}
+        and chat_type.get("user_id") is not None
+    ):
+        identities.add(_user_identity_id(chat_type["user_id"]))
+
     sender_identity_id = _sender_identity_id(message)
     if sender_identity_id is not None:
         identities.add(sender_identity_id)
@@ -113,7 +121,28 @@ def _conversation_label(payload: dict[str, Any], message: dict[str, Any]) -> str
     if title:
         return title
 
-    sender = message.get("sender_id") or {}
+    chat_type_value = chat.get("type")
+    chat_type: dict[str, Any] = chat_type_value if isinstance(chat_type_value, dict) else {}
+    chat_type_name = str(chat_type.get("@type") or "")
+    if (
+        chat_type_name in {"chatTypePrivate", "chatTypeSecret"}
+        and chat_type.get("user_id") is not None
+    ):
+        user = _user_map(payload).get(int(chat_type["user_id"]))
+        if user is not None:
+            display_name = _display_name(user)
+            if display_name:
+                return display_name
+
+    sender_value = message.get("sender_id")
+    sender: dict[str, Any] = sender_value if isinstance(sender_value, dict) else {}
+    if chat_type_name == "chatTypePrivate" and chat_type.get("user_id") == sender.get("user_id"):
+        user = _user_map(payload).get(int(chat_type["user_id"]))
+        if user is not None:
+            display_name = _display_name(user)
+            if display_name:
+                return display_name
+
     if sender.get("@type") == "messageSenderUser" and sender.get("user_id") is not None:
         user = _user_map(payload).get(int(sender["user_id"]))
         if user is not None:
@@ -207,7 +236,9 @@ def _artifact_records(
 
     return [
         NormalizedArtifact(
-            artifact_id=_artifact_id(account, message.get("id"), file_id),
+            artifact_id=_artifact_id(
+                account, str(message.get("id") or f"line-{line_number}"), file_id
+            ),
             source="telegram",
             account=account,
             kind=kind,
@@ -238,9 +269,11 @@ def normalize_telegram_day(paths: RecallPaths, *, date: str) -> tuple[Path, Path
     artifacts: list[NormalizedArtifact] = []
 
     for row in rows:
-        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        payload_value = row.get("payload")
+        payload: dict[str, Any] = payload_value if isinstance(payload_value, dict) else {}
         message = _message(payload)
-        content = message.get("content") if isinstance(message.get("content"), dict) else {}
+        content_value = message.get("content")
+        content: dict[str, Any] = content_value if isinstance(content_value, dict) else {}
         chat_id = message.get("chat_id")
         message_id = message.get("id")
         if chat_id is None or message_id is None:

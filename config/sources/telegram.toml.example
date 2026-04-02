@@ -4,6 +4,9 @@ api_hash_env_var = "TELEGRAM_API_HASH"
 phone_number_env_var = "TELEGRAM_PHONE_NUMBER"
 code_env_var = "TELEGRAM_AUTH_CODE"
 password_env_var = "TELEGRAM_AUTH_PASSWORD"
+tdlib_library_env_var = "TELEGRAM_TDLIB_LIBRARY_PATH"
 tdlib_state_dir = "data/state/telegram/tdlib"
-tdlib_library_path = "/run/current-system/sw/lib/libtdjson.so"
+# optional explicit override if autodetection or env-based resolution does not work
+# tdlib_library_path = "/absolute/path/to/libtdjson.so"
+tdlib_log_verbosity_level = 0
 artifact_download_policy = "metadata-only"

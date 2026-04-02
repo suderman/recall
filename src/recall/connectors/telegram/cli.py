@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import typer
@@ -22,7 +23,10 @@ from recall.connectors.telegram.tdlib import (
     build_tdlib_auth_settings,
 )
 from recall.storage.paths import RecallPaths
-from recall.storage.state import list_connector_cursors
+from recall.storage.state import get_connector_cursor, list_connector_cursors
+
+DEFAULT_DAEMON_POLL_SECONDS = 5.0
+DEFAULT_DAEMON_IDLE_SLEEP_SECONDS = 2.0
 
 
 def _paths_for(root: Path | None) -> RecallPaths:
@@ -71,12 +75,15 @@ def _capture_updates_from_tdlib(
     after_update_id: int | None,
     limit: int | None,
     mode: str,
-) -> None:
+):
     paths = _paths_for(root)
     paths.ensure_directories()
     config = load_telegram_config(paths)
     settings = build_tdlib_auth_settings(paths, config, account=account)
-    transport = TdlibJsonTransport(library_path=settings.library_path)
+    transport = TdlibJsonTransport(
+        library_path=settings.library_path,
+        log_verbosity_level=settings.log_verbosity_level,
+    )
     client = TdlibTelegramClient(transport=transport, settings=settings)
     try:
         result = capture_telegram_updates(
@@ -103,6 +110,27 @@ def _capture_updates_from_tdlib(
         typer.echo(f"cursor_key={result.cursor.cursor_key}")
         typer.echo(f"cursor_value={result.cursor.cursor_value}")
     typer.echo("next_step=run 'recall normalize telegram --date YYYY-MM-DD'")
+    return result
+
+
+def _resolve_after_update_id(
+    paths: RecallPaths,
+    *,
+    account: str,
+    after_update_id: int | None,
+) -> int | None:
+    if after_update_id is not None:
+        return after_update_id
+
+    cursor = get_connector_cursor(
+        paths,
+        source="telegram",
+        account=account,
+        cursor_key="last_update_id",
+    )
+    if cursor is None:
+        return None
+    return int(cursor.cursor_value)
 
 
 def append_telegram(
@@ -285,6 +313,110 @@ def run_telegram_tdlib_capture(
         limit=max_updates,
         mode="tdlib-run",
     )
+
+
+def run_telegram_tdlib_daemon(
+    account: str | None = typer.Option(None, "--account", help="Telegram account label to record."),
+    after_update_id: int | None = typer.Option(
+        None,
+        "--after-update-id",
+        help="Override the stored cursor for the first polling cycle.",
+    ),
+    poll_seconds: float = typer.Option(
+        DEFAULT_DAEMON_POLL_SECONDS,
+        "--poll-seconds",
+        min=0.1,
+        help="How long TDLib waits for updates in each polling cycle.",
+    ),
+    idle_sleep_seconds: float = typer.Option(
+        DEFAULT_DAEMON_IDLE_SLEEP_SECONDS,
+        "--idle-sleep-seconds",
+        min=0.0,
+        help="Sleep between idle polling cycles to reduce churn.",
+    ),
+    max_updates_per_cycle: int | None = typer.Option(
+        None,
+        "--max-updates-per-cycle",
+        min=1,
+        help="Cap each polling cycle for easier recovery and testing.",
+    ),
+    max_cycles: int | None = typer.Option(
+        None,
+        "--max-cycles",
+        min=1,
+        help="Optional safety bound for tests or supervised runs.",
+    ),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+) -> None:
+    """Run a restart-friendly Telegram TDLib capture loop."""
+
+    paths = _paths_for(root)
+    paths.ensure_directories()
+    config = load_telegram_config(paths)
+    resolved_account = account or config.account
+    resolved_after_update_id = _resolve_after_update_id(
+        paths,
+        account=resolved_account,
+        after_update_id=after_update_id,
+    )
+    settings = build_tdlib_auth_settings(paths, config, account=resolved_account)
+    transport = TdlibJsonTransport(
+        library_path=settings.library_path,
+        log_verbosity_level=settings.log_verbosity_level,
+    )
+    client = TdlibTelegramClient(
+        transport=transport,
+        settings=settings,
+        receive_timeout_seconds=poll_seconds,
+    )
+
+    typer.echo("mode=tdlib-daemon")
+    typer.echo(f"account={resolved_account}")
+    typer.echo("transport=tdlib")
+    typer.echo(
+        "start_after_update_id="
+        f"{resolved_after_update_id if resolved_after_update_id is not None else '-'}"
+    )
+    typer.echo(f"poll_seconds={poll_seconds}")
+    typer.echo(f"idle_sleep_seconds={idle_sleep_seconds}")
+    typer.echo(
+        "next_step=run 'recall normalize telegram --date YYYY-MM-DD' after capture accumulates"
+    )
+
+    cycles = 0
+    try:
+        while max_cycles is None or cycles < max_cycles:
+            result = capture_telegram_updates(
+                paths,
+                client=client,
+                account=resolved_account,
+                after_update_id=resolved_after_update_id,
+                limit=max_updates_per_cycle,
+                capture_mode="tdlib-daemon",
+            )
+            cycles += 1
+            typer.echo(
+                f"cycle={cycles} captured_updates={result.captured_updates} "
+                f"last_update_id={result.last_update_id if result.last_update_id is not None else '-'}"
+            )
+
+            if result.last_update_id is not None:
+                resolved_after_update_id = result.last_update_id
+
+            if result.captured_updates == 0 and idle_sleep_seconds > 0:
+                time.sleep(idle_sleep_seconds)
+    except KeyboardInterrupt:
+        typer.echo("status=stopped")
+        raise typer.Exit(code=0) from None
+    finally:
+        client.close()
 
 
 def normalize_telegram(

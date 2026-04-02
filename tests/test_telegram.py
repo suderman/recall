@@ -128,6 +128,48 @@ def test_normalize_telegram_day_writes_events_and_artifacts(tmp_path) -> None:
     ]
 
 
+def test_normalize_telegram_private_chat_uses_user_label_and_participants(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    target_dir = paths.raw_capture_dir("telegram", "2026-04-02")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "updates.jsonl").write_text(
+        json.dumps(
+            {
+                "account": "personal",
+                "capture_mode": "fixture",
+                "payload": {
+                    "chat": {"id": 1002, "type": {"@type": "chatTypePrivate", "user_id": 42}},
+                    "message": {
+                        "chat_id": 1002,
+                        "content": {"@type": "messageText", "text": {"text": "hello"}},
+                        "date": 1774976467,
+                        "id": 9105,
+                        "sender_id": {"@type": "messageSenderUser", "user_id": 99},
+                    },
+                    "users": [
+                        {"id": 42, "first_name": "Ariel", "last_name": "Example"},
+                        {"id": 99, "first_name": "Jon", "last_name": "Suderman"},
+                    ],
+                },
+                "received_at": "2026-04-02T17:31:08Z",
+                "source": "telegram",
+                "update_type": "updateNewMessage",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    event_path, _ = normalize_telegram_day(paths, date="2026-04-02")
+
+    record = json.loads(event_path.read_text(encoding="utf-8").splitlines()[0])
+    assert record["conversation_label"] == "Ariel Example"
+    assert record["participant_identity_ids"] == [
+        "ident_telegram_user_42",
+        "ident_telegram_user_99",
+    ]
+
+
 def test_sync_telegram_entities_persists_users_chats_and_aliases(tmp_path) -> None:
     paths = copy_fixture_capture(tmp_path)
 
@@ -254,6 +296,7 @@ def test_build_tdlib_auth_settings_reads_env_and_state_paths(tmp_path, monkeypat
     assert settings.phone_number == "+15551234567"
     assert settings.code == "99999"
     assert settings.password == "password"
+    assert settings.log_verbosity_level == 0
     assert settings.database_directory == tmp_path / "data/state/telegram/tdlib/work/database"
     assert settings.files_directory == tmp_path / "data/state/telegram/tdlib/work/files"
 
@@ -353,3 +396,81 @@ def test_tdlib_client_requires_code_when_tdlib_asks_for_it(tmp_path) -> None:
         assert "authentication code" in str(exc)
     else:
         raise AssertionError("Expected missing-code TDLib auth failure")
+
+
+def test_tdlib_client_prompts_for_code_when_interactive(tmp_path) -> None:
+    transport = FakeTdlibTransport(
+        [
+            {
+                "@type": "updateAuthorizationState",
+                "authorization_state": {"@type": "authorizationStateWaitCode"},
+            },
+            {
+                "@type": "updateAuthorizationState",
+                "authorization_state": {"@type": "authorizationStateReady"},
+            },
+        ]
+    )
+    prompts: list[tuple[str, bool]] = []
+    settings = TdlibAuthSettings(
+        account="personal",
+        api_id=123,
+        api_hash="hash",
+        phone_number="+15551234567",
+        database_directory=tmp_path / "tdlib" / "db",
+        files_directory=tmp_path / "tdlib" / "files",
+    )
+    client = TdlibTelegramClient(
+        transport=transport,
+        settings=settings,
+        auth_timeout_seconds=1.0,
+        receive_timeout_seconds=0.01,
+        prompt_callback=lambda message, hide_input: prompts.append((message, hide_input))
+        or "24680",
+        is_interactive=True,
+    )
+
+    updates = client.get_updates(limit=1)
+
+    assert updates == []
+    assert prompts == [("Telegram sent a login code. Enter it to continue: ", False)]
+    assert any(message.get("code") == "24680" for message in transport.sent)
+
+
+def test_tdlib_client_enriches_private_chat_participants(tmp_path) -> None:
+    transport = FakeTdlibTransport(
+        [
+            {
+                "@type": "updateAuthorizationState",
+                "authorization_state": {"@type": "authorizationStateReady"},
+            },
+            {
+                "@type": "updateNewMessage",
+                "message": {
+                    "id": 9104,
+                    "chat_id": 1002,
+                    "sender_id": {"@type": "messageSenderUser", "user_id": 99},
+                    "content": {"@type": "messageText", "text": {"text": "self to other"}},
+                },
+            },
+        ],
+        execute_responses={
+            (
+                "getChat",
+                1002,
+            ): {"id": 1002, "type": {"@type": "chatTypePrivate", "user_id": 42}},
+            ("getUser", 42): {"id": 42, "first_name": "Ariel", "last_name": "Example"},
+            ("getUser", 99): {"id": 99, "first_name": "Jon", "last_name": "Suderman"},
+        },
+    )
+    client = TdlibTelegramClient(
+        transport=transport,
+        settings=_tdlib_settings(tmp_path),
+        auth_timeout_seconds=1.0,
+        receive_timeout_seconds=0.01,
+    )
+
+    updates = client.get_updates(limit=1)
+
+    assert updates[0].payload["chat"]["participant_user_ids"] == [42, 99]
+    assert sorted(user["id"] for user in updates[0].payload["users"]) == [42, 99]

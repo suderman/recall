@@ -1,0 +1,16 @@
+[Unit]
+Description=Recall Telegram TDLib capture daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/src/suderman/recall
+Environment=RECALL_ROOT=%h/src/suderman/recall
+EnvironmentFile=%h/.config/recall/telegram.env
+ExecStart=/usr/bin/env bash -lc 'cd "$RECALL_ROOT" && nix develop -c recall capture telegram tdlib-daemon'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
