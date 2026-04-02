@@ -9,6 +9,8 @@ import typer
 from dotenv import load_dotenv
 
 from recall.config import resolve_root
+from recall.connectors.bluebubbles.artifacts import download_bluebubbles_artifacts
+from recall.connectors.bluebubbles.config import bluebubbles_config_path, load_bluebubbles_config
 from recall.connectors.slack.artifacts import download_slack_artifacts
 from recall.connectors.slack.config import load_slack_config, slack_config_path
 from recall.storage.jsonl import read_jsonl
@@ -38,6 +40,14 @@ def _looks_like_slack_scope_error(last_error: str | None) -> bool:
         "401 Unauthorized",
         "login",
     )
+    return any(indicator in last_error for indicator in indicators)
+
+
+def _looks_like_bluebubbles_auth_error(last_error: str | None) -> bool:
+    if not last_error:
+        return False
+
+    indicators = ("401", "403", "Unauthorized", "Forbidden", "guid=")
     return any(indicator in last_error for indicator in indicators)
 
 
@@ -201,4 +211,103 @@ def download_slack_artifact_bytes(
         typer.echo(
             "hint=Slack file download may require the 'files:read' user scope. "
             "After adding it, reinstall or refresh the token and try again."
+        )
+
+
+def download_bluebubbles_artifact_bytes(
+    date: str = typer.Option(
+        ..., "--date", help="Date to download artifacts for in YYYY-MM-DD format."
+    ),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+    policy: str | None = typer.Option(None, "--policy", help="Override artifact download policy."),
+    force: bool = typer.Option(False, "--force", help="Redownload even if local blob exists."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would download without writing blobs."
+    ),
+) -> None:
+    """Download source-native BlueBubbles attachment bytes for one day."""
+
+    load_dotenv()
+    paths = _paths_for(root)
+    paths.ensure_directories()
+    config = load_bluebubbles_config(paths)
+    password = os.getenv(config.password_env_var)
+    if not password:
+        raise typer.BadParameter(
+            f"Missing BlueBubbles password in environment variable {config.password_env_var}. "
+            f"See {bluebubbles_config_path(paths)} or config/sources/bluebubbles.toml.example."
+        )
+    if not config.server_url:
+        raise typer.BadParameter(
+            f"Missing BlueBubbles server_url in {bluebubbles_config_path(paths)}."
+        )
+
+    resolved_policy = policy or config.artifact_download_policy
+    artifact_path = paths.artifact_metadata_path("bluebubbles", date)
+    if not artifact_path.exists():
+        raise typer.BadParameter(
+            _missing_artifact_metadata_message(paths, source="bluebubbles", date=date)
+        )
+
+    if resolved_policy != "download-source-native":
+        typer.echo("source=bluebubbles")
+        typer.echo(f"date={date}")
+        typer.echo(f"policy={resolved_policy}")
+        typer.echo("download_mode=metadata-only")
+        typer.echo(
+            "next_step=use '--policy download-source-native' or update "
+            "config/sources/bluebubbles.toml to fetch BlueBubbles-hosted attachments"
+        )
+        raise typer.Exit(code=0)
+
+    result = download_bluebubbles_artifacts(
+        paths,
+        date=date,
+        server_url=config.server_url,
+        password=password,
+        policy=resolved_policy,
+        dry_run=dry_run,
+        force=force,
+    )
+
+    typer.echo("source=bluebubbles")
+    typer.echo(f"date={date}")
+    typer.echo(f"policy={resolved_policy}")
+    typer.echo(f"dry_run={str(dry_run).lower()}")
+    typer.echo(f"artifacts_path={result.artifact_path}")
+    typer.echo(f"artifacts_seen={result.artifacts_seen}")
+    typer.echo(f"would_download={result.would_download}")
+    typer.echo(f"downloaded={result.downloaded}")
+    typer.echo(f"skipped_policy={result.skipped_policy}")
+    typer.echo(f"skipped_existing={result.skipped_existing}")
+    typer.echo(f"failed={result.failed}")
+
+    if dry_run:
+        typer.echo(
+            "next_step=run without --dry-run to fetch source-native BlueBubbles attachment bytes"
+        )
+        return
+
+    if result.downloaded > 0:
+        typer.echo(
+            "next_step=run 'recall artifacts show --date "
+            f"{date} --source bluebubbles' to inspect local mirrors"
+        )
+        return
+
+    artifacts = read_jsonl(result.artifact_path)
+    if any(
+        _looks_like_bluebubbles_auth_error(artifact.get("last_error")) for artifact in artifacts
+    ):
+        typer.echo(
+            "hint=BlueBubbles attachment download may require a correct server_url "
+            "and server password. Confirm Recall on kit can reach bub and that "
+            "the password matches the BlueBubbles server."
         )

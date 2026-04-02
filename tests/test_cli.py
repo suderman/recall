@@ -317,6 +317,42 @@ def test_artifacts_download_reports_files_read_hint(tmp_path, monkeypatch) -> No
     assert "files:read" in result.stdout
 
 
+def test_artifacts_download_bluebubbles_reports_metadata_only_guidance(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("BLUEBUBBLES_PASSWORD", "secret")
+    config_dir = tmp_path / "config" / "sources"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "bluebubbles.toml").write_text(
+        (
+            'account = "personal"\n'
+            'server_url = "http://10.1.0.9:1234"\n'
+            'password_env_var = "BLUEBUBBLES_PASSWORD"\n'
+            'artifact_download_policy = "metadata-only"\n'
+        ),
+        encoding="utf-8",
+    )
+    paths = RecallPaths.from_root(tmp_path)
+    write_artifact_metadata(
+        paths,
+        source="bluebubbles",
+        date="2026-03-31",
+        artifacts=[
+            NormalizedArtifact(artifact_id="artifact_1", source="bluebubbles", kind="attachment")
+        ],
+    )
+
+    result = runner.invoke(
+        app,
+        ["artifacts", "download", "bluebubbles", "--root", str(tmp_path), "--date", "2026-03-31"],
+    )
+
+    assert result.exit_code == 0
+    assert "source=bluebubbles" in result.stdout
+    assert "download_mode=metadata-only" in result.stdout
+    assert "--policy download-source-native" in result.stdout
+
+
 def test_normalize_slack_reports_next_steps(tmp_path) -> None:
     paths = _copy_slack_fixture_capture(tmp_path)
     assert paths.raw_capture_dir("slack", "2026-03-31").exists()

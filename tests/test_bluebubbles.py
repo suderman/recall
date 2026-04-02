@@ -6,8 +6,10 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 from fastapi.testclient import TestClient
 
+from recall.connectors.bluebubbles.artifacts import download_bluebubbles_artifacts
 from recall.connectors.bluebubbles.capture import append_bluebubbles_event
 from recall.connectors.bluebubbles.config import BlueBubblesSourceConfig
 from recall.connectors.bluebubbles.entities import sync_bluebubbles_entities
@@ -117,6 +119,20 @@ def build_messages_db(tmp_path: Path) -> Path:
     finally:
         connection.close()
     return database_path
+
+
+class FakeBlueBubblesArtifactClient:
+    def __init__(self, payloads: dict[str, bytes]) -> None:
+        self.payloads = payloads
+
+    def get(self, url: str) -> httpx.Response:
+        request = httpx.Request("GET", url)
+        if url not in self.payloads:
+            return httpx.Response(404, request=request)
+        return httpx.Response(200, request=request, content=self.payloads[url])
+
+    def close(self) -> None:
+        return None
 
 
 def test_bluebubbles_webhook_captures_raw_event(tmp_path) -> None:
@@ -382,3 +398,96 @@ def test_normalize_bluebubbles_day_marks_imported_attachment_bytes(tmp_path) -> 
     )
     assert artifact["checksums"]["sha256"]
     assert artifact["last_error"] is None
+
+
+def test_download_bluebubbles_artifacts_live_fetches_attachment_bytes(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    append_bluebubbles_event(
+        paths,
+        account="personal",
+        payload=load_fixture(),
+        received_at="2026-03-31T21:31:07Z",
+    )
+    normalize_bluebubbles_day(paths, date="2026-03-31")
+    client = FakeBlueBubblesArtifactClient(
+        {
+            (
+                "http://10.1.0.9:1234/api/v1/attachment/at_001/download?guid=secret&original=false"
+            ): b"jpeg-live"
+        }
+    )
+
+    result = download_bluebubbles_artifacts(
+        paths,
+        date="2026-03-31",
+        server_url="http://10.1.0.9:1234",
+        password="secret",
+        policy="download-source-native",
+        client=client,
+    )
+
+    assert result.downloaded == 1
+    artifact_path = paths.artifact_metadata_path("bluebubbles", "2026-03-31")
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8").splitlines()[0])
+    assert artifact["download_status"] == "downloaded"
+    assert artifact["local_path"] is not None
+    assert artifact["checksums"]["sha256"]
+
+
+def test_download_bluebubbles_artifacts_imported_preserves_existing_bytes_without_force(
+    tmp_path,
+) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    database_path = build_messages_db(tmp_path)
+    export_dir = tmp_path / "export-with-attachments"
+    export_bluebubbles_history(
+        messages_db=database_path,
+        output_dir=export_dir,
+        from_date="2026-03-31",
+        to_date="2026-03-31",
+        export_id="bb_hist_20260331",
+        include_attachment_bytes=True,
+    )
+    import_bluebubbles_export(paths, export_path=export_dir, account="personal")
+    normalize_bluebubbles_day(paths, date="2026-03-31")
+
+    result = download_bluebubbles_artifacts(
+        paths,
+        date="2026-03-31",
+        server_url="http://10.1.0.9:1234",
+        password="secret",
+        policy="download-source-native",
+        client=FakeBlueBubblesArtifactClient({}),
+    )
+
+    assert result.downloaded == 0
+    assert result.skipped_existing == 1
+
+
+def test_download_bluebubbles_artifacts_records_failure_detail(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    append_bluebubbles_event(
+        paths,
+        account="personal",
+        payload=load_fixture(),
+        received_at="2026-03-31T21:31:07Z",
+    )
+    normalize_bluebubbles_day(paths, date="2026-03-31")
+
+    result = download_bluebubbles_artifacts(
+        paths,
+        date="2026-03-31",
+        server_url="http://10.1.0.9:1234",
+        password="wrong",
+        policy="download-source-native",
+        client=FakeBlueBubblesArtifactClient({}),
+    )
+
+    assert result.failed == 1
+    artifact = json.loads(
+        paths.artifact_metadata_path("bluebubbles", "2026-03-31")
+        .read_text(encoding="utf-8")
+        .splitlines()[0]
+    )
+    assert artifact["download_status"] == "failed"
+    assert "404" in artifact["last_error"]

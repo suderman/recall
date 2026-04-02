@@ -419,6 +419,7 @@ These should import archives into raw storage and then normalize from there.
 - normalize downstream
 - historical backfill via explicit export import, not webhook replay
 - optional attachment byte preservation via export bundles, not remote crawling
+- live attachment byte fetch may use explicit BlueBubbles server API access from the Recall host
 
 ### 11.4 Email
 - query notmuch directly at synthesis or normalization time

@@ -2,3 +2,6 @@ account = "personal"
 webhook_bind_host = "0.0.0.0"
 webhook_port = 8042
 webhook_token = "replace-me"
+server_url = "http://10.1.0.9:1234"
+password_env_var = "BLUEBUBBLES_PASSWORD"
+artifact_download_policy = "metadata-only"
