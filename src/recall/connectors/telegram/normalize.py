@@ -172,6 +172,35 @@ def _extract_text_and_tags(content: dict[str, Any]) -> tuple[str, list[str]]:
     return str(content.get("caption", {}).get("text") or ""), tags
 
 
+def _thread_id(message: dict[str, Any]) -> str | None:
+    reply_to_message_id = message.get("reply_to_message_id")
+    if reply_to_message_id is not None:
+        return f"reply:{reply_to_message_id}"
+
+    reply_to = message.get("reply_to")
+    if isinstance(reply_to, dict):
+        origin = reply_to.get("origin") if isinstance(reply_to.get("origin"), dict) else reply_to
+        message_id = origin.get("message_id") if isinstance(origin, dict) else None
+        if message_id is not None:
+            return f"reply:{message_id}"
+
+    media_album_id = message.get("media_album_id")
+    if media_album_id is not None:
+        return f"album:{media_album_id}"
+    return None
+
+
+def _message_tags(message: dict[str, Any], tags: list[str]) -> list[str]:
+    result = list(tags)
+    if _thread_id(message) and str(_thread_id(message)).startswith("reply:"):
+        result.append("reply")
+    if message.get("forward_info") is not None:
+        result.append("forwarded")
+    if message.get("media_album_id") is not None:
+        result.append("album")
+    return result
+
+
 def _artifact_id(account: str, message_id: int | str, file_id: str) -> str:
     payload = f"telegram:{account}:artifact:{message_id}:{file_id}".encode("utf-8")
     return f"artifact_{hashlib.sha256(payload).hexdigest()[:20]}"
@@ -304,7 +333,7 @@ def normalize_telegram_day(paths: RecallPaths, *, date: str) -> tuple[Path, Path
                 kind="message",
                 conversation_id=str(chat_id),
                 conversation_label=_conversation_label(payload, message),
-                thread_id=None,
+                thread_id=_thread_id(message),
                 sender_identity_id=_sender_identity_id(message),
                 participant_identity_ids=_participant_identity_ids(payload, message),
                 text=text,
@@ -320,7 +349,7 @@ def normalize_telegram_day(paths: RecallPaths, *, date: str) -> tuple[Path, Path
                     },
                 ),
                 raw_fragment=None,
-                tags=tags,
+                tags=_message_tags(message, tags),
             )
         )
 

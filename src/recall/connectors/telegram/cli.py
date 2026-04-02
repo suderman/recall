@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import typer
@@ -27,6 +28,15 @@ from recall.storage.state import get_connector_cursor, list_connector_cursors
 
 DEFAULT_DAEMON_POLL_SECONDS = 5.0
 DEFAULT_DAEMON_IDLE_SLEEP_SECONDS = 2.0
+
+
+def _tdlib_log_verbosity_option() -> int | None:
+    return typer.Option(
+        None,
+        "--tdlib-log-verbosity-level",
+        min=0,
+        help="Override the configured TDLib log verbosity for this run.",
+    )
 
 
 def _paths_for(root: Path | None) -> RecallPaths:
@@ -75,11 +85,14 @@ def _capture_updates_from_tdlib(
     after_update_id: int | None,
     limit: int | None,
     mode: str,
+    tdlib_log_verbosity_level: int | None,
 ):
     paths = _paths_for(root)
     paths.ensure_directories()
     config = load_telegram_config(paths)
     settings = build_tdlib_auth_settings(paths, config, account=account)
+    if tdlib_log_verbosity_level is not None:
+        settings = replace(settings, log_verbosity_level=tdlib_log_verbosity_level)
     transport = TdlibJsonTransport(
         library_path=settings.library_path,
         log_verbosity_level=settings.log_verbosity_level,
@@ -256,6 +269,7 @@ def capture_telegram_tdlib_once(
         "--after-update-id",
         help="Only capture updates newer than this id.",
     ),
+    tdlib_log_verbosity_level: int | None = _tdlib_log_verbosity_option(),
     root: Path | None = typer.Option(
         None,
         "--root",
@@ -276,6 +290,7 @@ def capture_telegram_tdlib_once(
         after_update_id=after_update_id,
         limit=1,
         mode="tdlib-once",
+        tdlib_log_verbosity_level=tdlib_log_verbosity_level,
     )
 
 
@@ -292,6 +307,7 @@ def run_telegram_tdlib_capture(
         min=1,
         help="Stop after capturing this many updates.",
     ),
+    tdlib_log_verbosity_level: int | None = _tdlib_log_verbosity_option(),
     root: Path | None = typer.Option(
         None,
         "--root",
@@ -312,6 +328,7 @@ def run_telegram_tdlib_capture(
         after_update_id=after_update_id,
         limit=max_updates,
         mode="tdlib-run",
+        tdlib_log_verbosity_level=tdlib_log_verbosity_level,
     )
 
 
@@ -346,6 +363,7 @@ def run_telegram_tdlib_daemon(
         min=1,
         help="Optional safety bound for tests or supervised runs.",
     ),
+    tdlib_log_verbosity_level: int | None = _tdlib_log_verbosity_option(),
     root: Path | None = typer.Option(
         None,
         "--root",
@@ -367,6 +385,8 @@ def run_telegram_tdlib_daemon(
         after_update_id=after_update_id,
     )
     settings = build_tdlib_auth_settings(paths, config, account=resolved_account)
+    if tdlib_log_verbosity_level is not None:
+        settings = replace(settings, log_verbosity_level=tdlib_log_verbosity_level)
     transport = TdlibJsonTransport(
         library_path=settings.library_path,
         log_verbosity_level=settings.log_verbosity_level,
@@ -386,6 +406,7 @@ def run_telegram_tdlib_daemon(
     )
     typer.echo(f"poll_seconds={poll_seconds}")
     typer.echo(f"idle_sleep_seconds={idle_sleep_seconds}")
+    typer.echo(f"tdlib_log_verbosity_level={settings.log_verbosity_level}")
     typer.echo(
         "next_step=run 'recall normalize telegram --date YYYY-MM-DD' after capture accumulates"
     )

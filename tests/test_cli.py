@@ -535,7 +535,7 @@ def test_capture_telegram_tdlib_once_reports_tdlib_transport(tmp_path, monkeypat
     import recall.connectors.telegram.cli as telegram_cli
 
     def fake_capture(**kwargs):
-        del kwargs
+        assert kwargs["tdlib_log_verbosity_level"] is None
         typer = __import__("typer")
         typer.echo("mode=tdlib-once")
         typer.echo("transport=tdlib")
@@ -556,7 +556,7 @@ def test_capture_telegram_tdlib_run_reports_tdlib_transport(tmp_path, monkeypatc
     import recall.connectors.telegram.cli as telegram_cli
 
     def fake_capture(**kwargs):
-        del kwargs
+        assert kwargs["tdlib_log_verbosity_level"] == 2
         typer = __import__("typer")
         typer.echo("mode=tdlib-run")
         typer.echo("transport=tdlib")
@@ -566,7 +566,17 @@ def test_capture_telegram_tdlib_run_reports_tdlib_transport(tmp_path, monkeypatc
 
     result = runner.invoke(
         app,
-        ["capture", "telegram", "tdlib-run", "--root", str(tmp_path), "--max-updates", "2"],
+        [
+            "capture",
+            "telegram",
+            "tdlib-run",
+            "--root",
+            str(tmp_path),
+            "--tdlib-log-verbosity-level",
+            "2",
+            "--max-updates",
+            "2",
+        ],
     )
 
     assert result.exit_code == 0

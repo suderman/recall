@@ -170,6 +170,93 @@ def test_normalize_telegram_private_chat_uses_user_label_and_participants(tmp_pa
     ]
 
 
+def test_normalize_telegram_reply_forward_and_album_threading(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    target_dir = paths.raw_capture_dir("telegram", "2026-04-03")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "updates.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "account": "personal",
+                        "payload": {
+                            "chat": {"id": 1003, "title": "Thread Test"},
+                            "message": {
+                                "chat_id": 1003,
+                                "content": {"@type": "messageText", "text": {"text": "reply text"}},
+                                "date": 1774976467,
+                                "id": 9201,
+                                "reply_to_message_id": 9100,
+                                "sender_id": {"@type": "messageSenderUser", "user_id": 42},
+                            },
+                        },
+                        "received_at": "2026-04-03T10:00:00Z",
+                        "source": "telegram",
+                        "update_type": "updateNewMessage",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "account": "personal",
+                        "payload": {
+                            "chat": {"id": 1003, "title": "Thread Test"},
+                            "message": {
+                                "chat_id": 1003,
+                                "content": {
+                                    "@type": "messageText",
+                                    "text": {"text": "forwarded text"},
+                                },
+                                "date": 1774976468,
+                                "forward_info": {"origin": {"@type": "messageForwardOriginUser"}},
+                                "id": 9202,
+                                "sender_id": {"@type": "messageSenderUser", "user_id": 42},
+                            },
+                        },
+                        "received_at": "2026-04-03T10:00:01Z",
+                        "source": "telegram",
+                        "update_type": "updateNewMessage",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "account": "personal",
+                        "payload": {
+                            "chat": {"id": 1003, "title": "Thread Test"},
+                            "message": {
+                                "chat_id": 1003,
+                                "content": {
+                                    "@type": "messagePhoto",
+                                    "caption": {"text": "album photo"},
+                                },
+                                "date": 1774976469,
+                                "id": 9203,
+                                "media_album_id": 777,
+                                "sender_id": {"@type": "messageSenderUser", "user_id": 42},
+                            },
+                        },
+                        "received_at": "2026-04-03T10:00:02Z",
+                        "source": "telegram",
+                        "update_type": "updateNewMessage",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    event_path, _ = normalize_telegram_day(paths, date="2026-04-03")
+    records = [json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()]
+
+    assert records[0]["thread_id"] == "reply:9100"
+    assert "reply" in records[0]["tags"]
+    assert records[1]["thread_id"] is None
+    assert "forwarded" in records[1]["tags"]
+    assert records[2]["thread_id"] == "album:777"
+    assert "album" in records[2]["tags"]
+
+
 def test_sync_telegram_entities_persists_users_chats_and_aliases(tmp_path) -> None:
     paths = copy_fixture_capture(tmp_path)
 
