@@ -312,6 +312,31 @@ For historical BlueBubbles backfill, export a bundle on the Mac first, then
 import it into Recall. The export bundle should contain `manifest.json` and
 `messages.jsonl` at the top level.
 
+Minimal macOS environment steps required to achieve BlueBubbles export:
+
+```bash
+# on the macOS machine that has the Messages history
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+
+# install a local Python 3.12 runtime without needing Nix or Xcode tools
+uv python install 3.12
+
+# copy the Recall repo onto the Mac, then from the repo root
+uv venv --python 3.12 .venv
+source .venv/bin/activate
+uv pip install -e .
+
+# export a BlueBubbles-compatible bundle from the local Messages database
+recall export bluebubbles-history ~/exports/recall/bluebubbles-history-YYYY-MM-DD_YYYY-MM-DD \
+  --from YYYY-MM-DD \
+  --to YYYY-MM-DD
+```
+
+This path is intended for a minimal macOS export machine like an old MacBook.
+It does not require Nix, Homebrew, or Xcode Command Line Tools for the
+BlueBubbles history export flow.
+
 Capture and normalize one day of Slack data:
 
 ```bash

@@ -134,7 +134,7 @@ def export_bluebubbles_history_bundle(
     from_date: str = typer.Option(..., "--from", help="Start date in YYYY-MM-DD format."),
     to_date: str = typer.Option(..., "--to", help="End date in YYYY-MM-DD format."),
     messages_db: Path = typer.Option(
-        Path("~/Library/Messages/chat.db"),
+        Path.home() / "Library/Messages/chat.db",
         "--messages-db",
         resolve_path=True,
         help="Path to the local macOS Messages database on the export machine.",
