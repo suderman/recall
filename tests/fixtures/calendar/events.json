@@ -1,0 +1,72 @@
+[
+  {
+    "all-day": false,
+    "calendar": "work",
+    "description": "Discuss roadmap and notes https://meet.example.com/team",
+    "end": "2026-03-31T16:00:00+00:00",
+    "location": "Zoom https://meet.example.com/team",
+    "organizer": "Manager Person (manager@example.com)",
+    "repeat-pattern": "",
+    "start": "2026-03-31T15:00:00+00:00",
+    "status": "CONFIRMED",
+    "title": "Team Sync",
+    "uid": "uid-team-sync",
+    "url": "https://meet.example.com/team"
+  },
+  {
+    "all-day": true,
+    "calendar": "personal",
+    "description": "Birthday reminder",
+    "end": "2026-04-01",
+    "location": "",
+    "organizer": "",
+    "repeat-pattern": "FREQ=YEARLY",
+    "start": "2026-03-31",
+    "status": "",
+    "title": "Birthday",
+    "uid": "uid-birthday",
+    "url": ""
+  },
+  {
+    "all-day": false,
+    "calendar": "work",
+    "description": "Instance of weekly planning",
+    "end": "2026-03-31T18:00:00+00:00",
+    "location": "Room 2",
+    "organizer": "Planner (planner@example.com)",
+    "repeat-pattern": "FREQ=WEEKLY",
+    "start": "2026-03-31T17:00:00+00:00",
+    "status": "CONFIRMED",
+    "title": "Weekly Planning",
+    "uid": "uid-weekly-planning",
+    "url": ""
+  },
+  {
+    "all-day": false,
+    "calendar": "work",
+    "description": "Canceled meeting",
+    "end": "2026-03-31T20:00:00+00:00",
+    "location": "",
+    "organizer": "Manager Person (manager@example.com)",
+    "repeat-pattern": "",
+    "start": "2026-03-31T19:00:00+00:00",
+    "status": "CANCELLED",
+    "title": "Canceled 1:1",
+    "uid": "uid-canceled-1-1",
+    "url": ""
+  },
+  {
+    "all-day": false,
+    "calendar": "personal",
+    "description": "Trip overlapping multiple days",
+    "end": "2026-03-31T09:00:00+00:00",
+    "location": "Airport",
+    "organizer": "",
+    "repeat-pattern": "",
+    "start": "2026-03-30T22:00:00+00:00",
+    "status": "CONFIRMED",
+    "title": "Overnight Trip",
+    "uid": "uid-overnight-trip",
+    "url": ""
+  }
+]

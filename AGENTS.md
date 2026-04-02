@@ -171,7 +171,7 @@ Keep this section current as implementation advances.
 ### Pending
 
 - [x] Email/notmuch normalization and entity extraction
-- [ ] Calendar/khal normalization
+- [x] Calendar/khal normalization
 - [ ] Asana import and normalization
 - [ ] Timestamp-aware resolution application in normalization/enrichment using `valid_from` and `valid_to`
 - [ ] Suggested-match review workflow for ambiguous cross-source identities

@@ -58,6 +58,7 @@
           packages = [
             pythonEnv
             self.packages.${system}.default
+            pkgs.khal
             pkgs.notmuch
             pkgs.sqlite
             pkgs.tdlib

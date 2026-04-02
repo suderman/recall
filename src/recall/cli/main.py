@@ -26,6 +26,7 @@ from recall.connectors.bluebubbles.cli import (
     serve_bluebubbles,
     sync_bluebubbles_entities,
 )
+from recall.connectors.calendar.cli import normalize_calendar
 from recall.connectors.email.cli import normalize_email, sync_email_entities
 from recall.connectors.slack.cli import (
     capture_slack,
@@ -151,6 +152,7 @@ normalize_app.command("slack")(normalize_slack)
 normalize_app.command("bluebubbles")(normalize_bluebubbles)
 normalize_app.command("telegram")(normalize_telegram)
 normalize_app.command("email")(normalize_email)
+normalize_app.command("calendar")(normalize_calendar)
 events_app.command("show")(show_events)
 artifacts_app.command("show")(show_artifacts)
 artifacts_download_app.command("slack")(download_slack_artifact_bytes)

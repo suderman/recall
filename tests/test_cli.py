@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typer.testing import CliRunner
 
 import recall.cli.artifacts as artifacts_cli
+import recall.connectors.calendar.cli as calendar_cli
 import recall.connectors.email.cli as email_cli
 from recall.cli.main import app
 from recall.connectors.telegram.entities import sync_telegram_entities
@@ -403,6 +404,24 @@ def test_normalize_email_reports_next_steps(tmp_path, monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert "recall entities sync email --date 2026-03-31" in result.stdout
+
+
+def test_normalize_calendar_reports_next_steps(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        calendar_cli,
+        "normalize_calendar_day",
+        lambda *args, **kwargs: RecallPaths.from_root(tmp_path).normalized
+        / "2026"
+        / "2026-03-31.jsonl",
+    )
+
+    result = runner.invoke(
+        app,
+        ["normalize", "calendar", "--root", str(tmp_path), "--date", "2026-03-31"],
+    )
+
+    assert result.exit_code == 0
+    assert "recall events show --date 2026-03-31" in result.stdout
 
 
 def test_capture_bluebubbles_serve_reports_webhook_url_hint(tmp_path, monkeypatch) -> None:
@@ -893,7 +912,8 @@ def test_entities_match_applies_cross_source_resolution(tmp_path) -> None:
     assert "automatic_resolutions=1" in result.stdout
     with sqlite3.connect(paths.database) as connection:
         identity = connection.execute(
-            "select person_id from identities where identity_id = 'ident_bluebubbles_plus15551234567'"
+            "select person_id from identities "
+            "where identity_id = 'ident_bluebubbles_plus15551234567'"
         ).fetchone()
 
     assert identity == ("person_telegram_user_42",)
