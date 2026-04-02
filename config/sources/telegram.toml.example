@@ -1,0 +1,6 @@
+account = "personal"
+api_id_env_var = "TELEGRAM_API_ID"
+api_hash_env_var = "TELEGRAM_API_HASH"
+phone_number_env_var = "TELEGRAM_PHONE_NUMBER"
+tdlib_state_dir = "data/state/telegram/tdlib"
+artifact_download_policy = "metadata-only"

@@ -1,0 +1,298 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from recall.connectors.telegram.capture import parse_date, raw_capture_paths
+from recall.normalize.artifacts import NormalizedArtifact, RemoteLocator
+from recall.normalize.events import NormalizedEvent, RawReference
+from recall.storage.jsonl import write_artifact_metadata, write_normalized_events
+from recall.storage.paths import RecallPaths
+
+URL_PATTERN = re.compile(r'https?://[^\s)>"]+')
+
+
+def _load_raw_updates(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as handle:
+        for index, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            row["_line_number"] = index
+            rows.append(row)
+    return rows
+
+
+def _to_iso(value: int | float | str | None, fallback: str) -> str:
+    if value is None:
+        return fallback
+    timestamp = int(value)
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _source_urls(text: str | None) -> list[str]:
+    if not text:
+        return []
+    return URL_PATTERN.findall(text)
+
+
+def _message(payload: dict[str, Any]) -> dict[str, Any]:
+    message = payload.get("message")
+    if isinstance(message, dict):
+        return message
+    return payload
+
+
+def _user_map(payload: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    users = payload.get("users") or []
+    result: dict[int, dict[str, Any]] = {}
+    for user in users:
+        if isinstance(user, dict) and user.get("id") is not None:
+            result[int(user["id"])] = user
+    return result
+
+
+def _chat(payload: dict[str, Any]) -> dict[str, Any]:
+    chat = payload.get("chat")
+    if isinstance(chat, dict):
+        return chat
+    return {}
+
+
+def _user_identity_id(user_id: int | str) -> str:
+    return f"ident_telegram_user_{user_id}"
+
+
+def _chat_identity_id(chat_id: int | str) -> str:
+    return f"ident_telegram_chat_{chat_id}"
+
+
+def _sender_identity_id(message: dict[str, Any]) -> str | None:
+    sender = message.get("sender_id") or {}
+    sender_type = sender.get("@type")
+    if sender_type == "messageSenderUser" and sender.get("user_id") is not None:
+        return _user_identity_id(sender["user_id"])
+    if sender_type == "messageSenderChat" and sender.get("chat_id") is not None:
+        return _chat_identity_id(sender["chat_id"])
+    return None
+
+
+def _participant_identity_ids(payload: dict[str, Any], message: dict[str, Any]) -> list[str]:
+    chat = _chat(payload)
+    identities: set[str] = set()
+    for user_id in chat.get("participant_user_ids") or []:
+        identities.add(_user_identity_id(user_id))
+
+    sender_identity_id = _sender_identity_id(message)
+    if sender_identity_id is not None:
+        identities.add(sender_identity_id)
+
+    return sorted(identities)
+
+
+def _display_name(user: dict[str, Any]) -> str | None:
+    first = str(user.get("first_name") or "").strip()
+    last = str(user.get("last_name") or "").strip()
+    full = " ".join(part for part in (first, last) if part).strip()
+    if full:
+        return full
+    usernames = user.get("usernames") or []
+    if usernames:
+        return f"@{usernames[0]}"
+    return None
+
+
+def _conversation_label(payload: dict[str, Any], message: dict[str, Any]) -> str:
+    chat = _chat(payload)
+    title = str(chat.get("title") or "").strip()
+    if title:
+        return title
+
+    sender = message.get("sender_id") or {}
+    if sender.get("@type") == "messageSenderUser" and sender.get("user_id") is not None:
+        user = _user_map(payload).get(int(sender["user_id"]))
+        if user is not None:
+            display_name = _display_name(user)
+            if display_name:
+                return display_name
+
+    chat_id = message.get("chat_id")
+    return f"chat:{chat_id}" if chat_id is not None else "unknown-chat"
+
+
+def _extract_text_and_tags(content: dict[str, Any]) -> tuple[str, list[str]]:
+    content_type = str(content.get("@type") or "")
+    tags = ["message", "telegram"]
+    if content_type == "messageText":
+        text = content.get("text", {}).get("text")
+        return str(text or ""), tags + ["text"]
+    if content_type == "messagePhoto":
+        caption = content.get("caption", {}).get("text")
+        return str(caption or ""), tags + ["photo"]
+    if content_type == "messageDocument":
+        caption = content.get("caption", {}).get("text")
+        return str(caption or ""), tags + ["document"]
+    if content_type == "messageVoiceNote":
+        caption = content.get("caption", {}).get("text")
+        return str(caption or ""), tags + ["voice_note"]
+    return str(content.get("caption", {}).get("text") or ""), tags
+
+
+def _artifact_id(account: str, message_id: int | str, file_id: str) -> str:
+    payload = f"telegram:{account}:artifact:{message_id}:{file_id}".encode("utf-8")
+    return f"artifact_{hashlib.sha256(payload).hexdigest()[:20]}"
+
+
+def _event_id(account: str, chat_id: int | str, message_id: int | str) -> str:
+    payload = f"telegram:{account}:{chat_id}:{message_id}".encode("utf-8")
+    return f"evt_{hashlib.sha256(payload).hexdigest()[:20]}"
+
+
+def _file_details(content: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+    content_type = str(content.get("@type") or "")
+    if content_type == "messagePhoto":
+        photo = content.get("photo") or {}
+        return ("photo", photo) if isinstance(photo, dict) else None
+    if content_type == "messageDocument":
+        document = content.get("document") or {}
+        return ("document", document) if isinstance(document, dict) else None
+    if content_type == "messageVoiceNote":
+        voice_note = content.get("voice_note") or {}
+        return ("voice_note", voice_note) if isinstance(voice_note, dict) else None
+    return None
+
+
+def _artifact_records(
+    *,
+    account: str,
+    message: dict[str, Any],
+    content: dict[str, Any],
+    event_id: str,
+    timestamp: str,
+    raw_path: str,
+    line_number: int,
+) -> list[NormalizedArtifact]:
+    file_details = _file_details(content)
+    if file_details is None:
+        return []
+
+    kind, file_object = file_details
+    file_id = str(
+        file_object.get("id") or file_object.get("remote", {}).get("id") or f"line-{line_number}"
+    )
+    raw_ref = RawReference(
+        source="telegram",
+        path=raw_path,
+        locator={
+            "line": line_number,
+            "message_id": message.get("id"),
+            "file_id": file_id,
+        },
+    )
+    locators: list[RemoteLocator] = []
+    local_path = file_object.get("local", {}).get("path")
+    remote_id = file_object.get("remote", {}).get("id")
+    remote_unique_id = file_object.get("remote", {}).get("unique_id")
+    if isinstance(local_path, str) and local_path:
+        locators.append(RemoteLocator(kind="local_path", value=local_path))
+    if isinstance(remote_id, str) and remote_id:
+        locators.append(RemoteLocator(kind="remote_id", value=remote_id))
+    if isinstance(remote_unique_id, str) and remote_unique_id:
+        locators.append(RemoteLocator(kind="remote_unique_id", value=remote_unique_id))
+
+    return [
+        NormalizedArtifact(
+            artifact_id=_artifact_id(account, message.get("id"), file_id),
+            source="telegram",
+            account=account,
+            kind=kind,
+            source_object_id=file_id,
+            event_ids=[event_id],
+            remote_locators=locators,
+            local_path=None,
+            mime_type=file_object.get("mime_type"),
+            filename=file_object.get("file_name"),
+            size_bytes=int(file_object["size"]) if file_object.get("size") is not None else None,
+            checksums={},
+            download_status="not_requested",
+            observed_at=timestamp,
+            raw_ref=raw_ref,
+        )
+    ]
+
+
+def normalize_telegram_day(paths: RecallPaths, *, date: str) -> tuple[Path, Path]:
+    parse_date(date)
+    paths.ensure_directories()
+    raw_dir, updates_path = raw_capture_paths(paths, date)
+    if not updates_path.exists():
+        raise FileNotFoundError(f"Missing Telegram raw capture for {date} in {raw_dir}")
+
+    rows = _load_raw_updates(updates_path)
+    events: list[NormalizedEvent] = []
+    artifacts: list[NormalizedArtifact] = []
+
+    for row in rows:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        message = _message(payload)
+        content = message.get("content") if isinstance(message.get("content"), dict) else {}
+        chat_id = message.get("chat_id")
+        message_id = message.get("id")
+        if chat_id is None or message_id is None:
+            continue
+
+        timestamp = _to_iso(message.get("date"), str(row.get("received_at") or f"{date}T00:00:00Z"))
+        account = str(row.get("account") or "personal")
+        event_id = _event_id(account, chat_id, message_id)
+        raw_path = paths.relative_to_root(updates_path)
+        text, tags = _extract_text_and_tags(content)
+        event_artifacts = _artifact_records(
+            account=account,
+            message=message,
+            content=content,
+            event_id=event_id,
+            timestamp=timestamp,
+            raw_path=raw_path,
+            line_number=row["_line_number"],
+        )
+        artifacts.extend(event_artifacts)
+        events.append(
+            NormalizedEvent(
+                event_id=event_id,
+                source="telegram",
+                account=account,
+                timestamp=timestamp,
+                date=date,
+                kind="message",
+                conversation_id=str(chat_id),
+                conversation_label=_conversation_label(payload, message),
+                thread_id=None,
+                sender_identity_id=_sender_identity_id(message),
+                participant_identity_ids=_participant_identity_ids(payload, message),
+                text=text,
+                source_urls=_source_urls(text),
+                artifact_ids=[artifact.artifact_id for artifact in event_artifacts],
+                raw_ref=RawReference(
+                    source="telegram",
+                    path=raw_path,
+                    locator={
+                        "line": row["_line_number"],
+                        "message_id": message_id,
+                        "chat_id": chat_id,
+                    },
+                ),
+                raw_fragment=None,
+                tags=tags,
+            )
+        )
+
+    artifact_path = write_artifact_metadata(
+        paths, source="telegram", date=date, artifacts=artifacts
+    )
+    event_path = write_normalized_events(paths, date, events, merge_existing=True)
+    return event_path, artifact_path

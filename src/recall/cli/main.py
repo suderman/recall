@@ -25,6 +25,11 @@ from recall.connectors.slack.cli import (
     show_slack_state,
     sync_slack_entities,
 )
+from recall.connectors.telegram.cli import (
+    normalize_telegram,
+    show_telegram_state,
+    sync_telegram_entities,
+)
 from recall.storage.db import initialize_database
 from recall.storage.paths import RecallPaths
 
@@ -119,13 +124,16 @@ capture_app.command("slack")(capture_slack)
 bluebubbles_capture_app.command("serve")(serve_bluebubbles)
 normalize_app.command("slack")(normalize_slack)
 normalize_app.command("bluebubbles")(normalize_bluebubbles)
+normalize_app.command("telegram")(normalize_telegram)
 events_app.command("show")(show_events)
 artifacts_app.command("show")(show_artifacts)
 artifacts_download_app.command("slack")(download_slack_artifact_bytes)
 artifacts_download_app.command("bluebubbles")(download_bluebubbles_artifact_bytes)
 entities_sync_app.command("slack")(sync_slack_entities)
 entities_sync_app.command("bluebubbles")(sync_bluebubbles_entities)
+entities_sync_app.command("telegram")(sync_telegram_entities)
 state_show_app.command("slack")(show_slack_state)
+state_show_app.command("telegram")(show_telegram_state)
 import_app.command("bluebubbles-export")(import_bluebubbles_export_bundle)
 export_app.command("bluebubbles-history")(export_bluebubbles_history_bundle)
 

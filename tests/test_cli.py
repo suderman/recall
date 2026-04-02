@@ -16,6 +16,7 @@ from recall.storage.paths import RecallPaths
 
 runner = CliRunner()
 SLACK_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "slack_capture"
+TELEGRAM_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "telegram"
 
 
 def _copy_slack_fixture_capture(tmp_path) -> RecallPaths:
@@ -25,6 +26,16 @@ def _copy_slack_fixture_capture(tmp_path) -> RecallPaths:
 
     for name in ("metadata.json", "conversations.json", "messages.jsonl"):
         shutil.copy(SLACK_FIXTURE_DIR / name, target_dir / name)
+
+    return paths
+
+
+def _copy_telegram_fixture_capture(tmp_path) -> RecallPaths:
+    paths = RecallPaths.from_root(tmp_path)
+    target_dir = paths.raw_capture_dir("telegram", "2026-03-31")
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    shutil.copy(TELEGRAM_FIXTURE_DIR / "updates.jsonl", target_dir / "updates.jsonl")
 
     return paths
 
@@ -441,9 +452,47 @@ def test_entities_sync_slack_persists_identity_rows(tmp_path) -> None:
     assert identity_count == 3
 
 
+def test_normalize_telegram_reports_next_steps(tmp_path) -> None:
+    _copy_telegram_fixture_capture(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["normalize", "telegram", "--root", str(tmp_path), "--date", "2026-03-31"],
+    )
+
+    assert result.exit_code == 0
+    assert "recall entities sync telegram --date 2026-03-31" in result.stdout
+
+
+def test_entities_sync_telegram_persists_identity_rows(tmp_path) -> None:
+    paths = _copy_telegram_fixture_capture(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["entities", "sync", "telegram", "--root", str(tmp_path), "--date", "2026-03-31"],
+    )
+
+    assert result.exit_code == 0
+    assert "identities=3" in result.stdout
+    assert "identity_aliases=6" in result.stdout
+
+    with sqlite3.connect(paths.database) as connection:
+        identity_count = connection.execute("select count(*) from identities").fetchone()[0]
+
+    assert identity_count == 3
+
+
 def test_state_show_slack_reports_empty_state(tmp_path) -> None:
     result = runner.invoke(app, ["state", "show", "slack", "--root", str(tmp_path)])
 
     assert result.exit_code == 0
     assert "source=slack" in result.stdout
+    assert "cursor_state=empty" in result.stdout
+
+
+def test_state_show_telegram_reports_empty_state(tmp_path) -> None:
+    result = runner.invoke(app, ["state", "show", "telegram", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "source=telegram" in result.stdout
     assert "cursor_state=empty" in result.stdout
