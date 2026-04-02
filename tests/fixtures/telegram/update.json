@@ -1,0 +1,37 @@
+{
+  "chat": {
+    "id": 1001,
+    "participant_user_ids": [42, 99],
+    "title": "Ariel"
+  },
+  "message": {
+    "chat_id": 1001,
+    "content": {
+      "@type": "messageText",
+      "text": {
+        "text": "Single update from Telegram https://example.com/single"
+      }
+    },
+    "date": 1774978467,
+    "id": 9003,
+    "sender_id": {
+      "@type": "messageSenderUser",
+      "user_id": 42
+    }
+  },
+  "users": [
+    {
+      "first_name": "Ariel",
+      "id": 42,
+      "last_name": "Example",
+      "phone_number": "+15551234567",
+      "usernames": ["ariel"]
+    },
+    {
+      "first_name": "Jon",
+      "id": 99,
+      "last_name": "Suderman",
+      "usernames": ["jonsuderman"]
+    }
+  ]
+}

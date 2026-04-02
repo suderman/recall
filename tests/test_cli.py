@@ -464,6 +464,73 @@ def test_normalize_telegram_reports_next_steps(tmp_path) -> None:
     assert "recall entities sync telegram --date 2026-03-31" in result.stdout
 
 
+def test_capture_telegram_append_reports_cursor_and_next_step(tmp_path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "capture",
+            "telegram",
+            "append",
+            str(TELEGRAM_FIXTURE_DIR / "update.json"),
+            "--root",
+            str(tmp_path),
+            "--update-type",
+            "updateNewMessage",
+            "--update-id",
+            "12345",
+            "--received-at",
+            "2026-03-31T18:00:00Z",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "mode=append" in result.stdout
+    assert "cursor_key=last_update_id" in result.stdout
+    assert "cursor_value=12345" in result.stdout
+    assert "recall normalize telegram --date 2026-03-31" in result.stdout
+
+
+def test_capture_telegram_once_reports_single_update(tmp_path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "capture",
+            "telegram",
+            "once",
+            str(TELEGRAM_FIXTURE_DIR / "update_stream.jsonl"),
+            "--root",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "mode=once" in result.stdout
+    assert "captured_updates=1" in result.stdout
+    assert "last_update_id=12345" in result.stdout
+
+
+def test_capture_telegram_run_respects_after_update_id(tmp_path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "capture",
+            "telegram",
+            "run",
+            str(TELEGRAM_FIXTURE_DIR / "update_stream.jsonl"),
+            "--root",
+            str(tmp_path),
+            "--after-update-id",
+            "12345",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "mode=run" in result.stdout
+    assert "captured_updates=1" in result.stdout
+    assert "last_update_id=12346" in result.stdout
+    assert "cursor_value=12346" in result.stdout
+
+
 def test_entities_sync_telegram_persists_identity_rows(tmp_path) -> None:
     paths = _copy_telegram_fixture_capture(tmp_path)
 

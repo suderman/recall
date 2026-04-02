@@ -5,6 +5,12 @@ from pathlib import Path
 import typer
 
 from recall.config import resolve_root
+from recall.connectors.telegram.capture import (
+    append_telegram_update,
+    capture_telegram_updates,
+    load_update_payload,
+)
+from recall.connectors.telegram.client import FileTelegramClient
 from recall.connectors.telegram.config import load_telegram_config
 from recall.connectors.telegram.entities import (
     sync_telegram_entities as sync_telegram_entities_for_date,
@@ -16,6 +22,157 @@ from recall.storage.state import list_connector_cursors
 
 def _paths_for(root: Path | None) -> RecallPaths:
     return RecallPaths.from_root(resolve_root(root))
+
+
+def _capture_updates_from_file(
+    *,
+    updates_file: Path,
+    account: str,
+    root: Path | None,
+    after_update_id: int | None,
+    limit: int | None,
+    mode: str,
+) -> None:
+    paths = _paths_for(root)
+    paths.ensure_directories()
+    client = FileTelegramClient.from_path(updates_file)
+    result = capture_telegram_updates(
+        paths,
+        client=client,
+        account=account,
+        after_update_id=after_update_id,
+        limit=limit,
+        capture_mode=mode,
+    )
+    typer.echo(f"mode={mode}")
+    typer.echo(f"account={account}")
+    typer.echo(f"updates_file={updates_file}")
+    typer.echo(f"after_update_id={after_update_id if after_update_id is not None else '-'}")
+    typer.echo(f"captured_updates={result.captured_updates}")
+    typer.echo("dates_written=" + (",".join(result.dates_written) if result.dates_written else "-"))
+    typer.echo(
+        f"last_update_id={result.last_update_id if result.last_update_id is not None else '-'}"
+    )
+    if result.cursor is not None:
+        typer.echo(f"cursor_key={result.cursor.cursor_key}")
+        typer.echo(f"cursor_value={result.cursor.cursor_value}")
+    typer.echo("next_step=run 'recall normalize telegram --date YYYY-MM-DD'")
+
+
+def append_telegram(
+    payload_path: Path = typer.Argument(..., exists=True, resolve_path=True),
+    update_type: str = typer.Option(..., "--update-type", help="Raw Telegram update type."),
+    update_id: int | None = typer.Option(None, "--update-id", help="TDLib update id to store."),
+    account: str | None = typer.Option(None, "--account", help="Telegram account label to record."),
+    received_at: str | None = typer.Option(
+        None,
+        "--received-at",
+        help="Override the receive timestamp with an ISO-8601 value.",
+    ),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+) -> None:
+    """Append one Telegram raw update envelope from a JSON file."""
+
+    paths = _paths_for(root)
+    paths.ensure_directories()
+    config = load_telegram_config(paths)
+    resolved_account = account or config.account
+    payload = load_update_payload(payload_path)
+    result = append_telegram_update(
+        paths,
+        account=resolved_account,
+        payload=payload,
+        update_type=update_type,
+        update_id=update_id,
+        received_at=received_at,
+        capture_mode="manual",
+    )
+    typer.echo("mode=append")
+    typer.echo(f"account={resolved_account}")
+    typer.echo(f"payload={payload_path}")
+    typer.echo(f"raw_dir={result.raw_dir}")
+    typer.echo(f"updates={result.updates_path}")
+    if result.cursor is not None:
+        typer.echo(f"cursor_key={result.cursor.cursor_key}")
+        typer.echo(f"cursor_value={result.cursor.cursor_value}")
+    typer.echo(f"next_step=run 'recall normalize telegram --date {result.date}'")
+
+
+def capture_telegram_once(
+    updates_file: Path = typer.Argument(..., exists=True, resolve_path=True),
+    account: str | None = typer.Option(None, "--account", help="Telegram account label to record."),
+    after_update_id: int | None = typer.Option(
+        None,
+        "--after-update-id",
+        help="Only capture updates newer than this id.",
+    ),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+) -> None:
+    """Capture one Telegram update from a file-backed update stream."""
+
+    paths = _paths_for(root)
+    config = load_telegram_config(paths)
+    resolved_account = account or config.account
+    _capture_updates_from_file(
+        updates_file=updates_file,
+        account=resolved_account,
+        root=root,
+        after_update_id=after_update_id,
+        limit=1,
+        mode="once",
+    )
+
+
+def run_telegram_capture(
+    updates_file: Path = typer.Argument(..., exists=True, resolve_path=True),
+    account: str | None = typer.Option(None, "--account", help="Telegram account label to record."),
+    after_update_id: int | None = typer.Option(
+        None,
+        "--after-update-id",
+        help="Only capture updates newer than this id.",
+    ),
+    max_updates: int | None = typer.Option(
+        None,
+        "--max-updates",
+        min=1,
+        help="Stop after capturing this many updates.",
+    ),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+) -> None:
+    """Capture a batch of Telegram updates from a file-backed update stream."""
+
+    paths = _paths_for(root)
+    config = load_telegram_config(paths)
+    resolved_account = account or config.account
+    _capture_updates_from_file(
+        updates_file=updates_file,
+        account=resolved_account,
+        root=root,
+        after_update_id=after_update_id,
+        limit=max_updates,
+        mode="run",
+    )
 
 
 def normalize_telegram(

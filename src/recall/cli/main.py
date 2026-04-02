@@ -26,7 +26,10 @@ from recall.connectors.slack.cli import (
     sync_slack_entities,
 )
 from recall.connectors.telegram.cli import (
+    append_telegram,
+    capture_telegram_once,
     normalize_telegram,
+    run_telegram_capture,
     show_telegram_state,
     sync_telegram_entities,
 )
@@ -44,6 +47,7 @@ entities_sync_app = typer.Typer(help="Sync source identities into SQLite.")
 state_app = typer.Typer(help="Inspect operational connector state.")
 state_show_app = typer.Typer(help="Show stored connector state.")
 bluebubbles_capture_app = typer.Typer(help="BlueBubbles capture commands.")
+telegram_capture_app = typer.Typer(help="Telegram capture commands.")
 import_app = typer.Typer(help="Import historical export bundles.")
 export_app = typer.Typer(help="Export source-native history bundles.")
 
@@ -59,6 +63,7 @@ entities_app.add_typer(entities_sync_app, name="sync")
 state_app.add_typer(state_show_app, name="show")
 artifacts_app.add_typer(artifacts_download_app, name="download")
 capture_app.add_typer(bluebubbles_capture_app, name="bluebubbles")
+capture_app.add_typer(telegram_capture_app, name="telegram")
 
 
 def _load_paths(root: Path | None) -> RecallPaths:
@@ -122,6 +127,9 @@ def version() -> None:
 
 capture_app.command("slack")(capture_slack)
 bluebubbles_capture_app.command("serve")(serve_bluebubbles)
+telegram_capture_app.command("append")(append_telegram)
+telegram_capture_app.command("once")(capture_telegram_once)
+telegram_capture_app.command("run")(run_telegram_capture)
 normalize_app.command("slack")(normalize_slack)
 normalize_app.command("bluebubbles")(normalize_bluebubbles)
 normalize_app.command("telegram")(normalize_telegram)

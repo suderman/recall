@@ -5,6 +5,12 @@ import shutil
 import sqlite3
 from pathlib import Path
 
+from recall.connectors.telegram.capture import (
+    append_telegram_update,
+    capture_telegram_updates,
+    load_update_payload,
+)
+from recall.connectors.telegram.client import FileTelegramClient
 from recall.connectors.telegram.entities import sync_telegram_entities
 from recall.connectors.telegram.normalize import normalize_telegram_day
 from recall.storage.paths import RecallPaths
@@ -125,3 +131,62 @@ def test_sync_telegram_entities_is_idempotent(tmp_path) -> None:
 
     assert identity_count == 3
     assert alias_count == 6
+
+
+def test_append_telegram_update_writes_raw_envelope_and_cursor(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    payload = load_update_payload(FIXTURE_DIR / "update.json")
+
+    result = append_telegram_update(
+        paths,
+        account="personal",
+        payload=payload,
+        update_type="updateNewMessage",
+        update_id=12345,
+        received_at="2026-03-31T18:00:00Z",
+    )
+
+    row = json.loads(result.updates_path.read_text(encoding="utf-8").splitlines()[0])
+    assert row["source"] == "telegram"
+    assert row["capture_mode"] == "manual"
+    assert row["update_type"] == "updateNewMessage"
+    assert row["update_id"] == 12345
+    assert row["payload"]["message"]["id"] == 9003
+    assert result.cursor is not None
+    assert result.cursor.cursor_key == "last_update_id"
+    assert result.cursor.cursor_value == "12345"
+
+
+def test_file_telegram_client_filters_updates_after_cursor() -> None:
+    client = FileTelegramClient.from_path(FIXTURE_DIR / "update_stream.jsonl")
+
+    updates = client.get_updates(after_update_id=12345)
+
+    assert len(updates) == 1
+    assert updates[0].update_id == 12346
+    assert updates[0].payload["message"]["id"] == 9102
+
+
+def test_capture_telegram_updates_appends_batch_and_tracks_cursor(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    client = FileTelegramClient.from_path(FIXTURE_DIR / "update_stream.jsonl")
+
+    result = capture_telegram_updates(
+        paths,
+        client=client,
+        account="personal",
+        after_update_id=12345,
+        capture_mode="run",
+    )
+
+    assert result.captured_updates == 1
+    assert result.dates_written == ["2026-03-31"]
+    assert result.last_update_id == 12346
+    assert result.cursor is not None
+    assert result.cursor.cursor_value == "12346"
+
+    updates_path = paths.raw_capture_dir("telegram", "2026-03-31") / "updates.jsonl"
+    rows = [json.loads(line) for line in updates_path.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["capture_mode"] == "run"
+    assert rows[0]["update_id"] == 12346
