@@ -418,6 +418,7 @@ These should import archives into raw storage and then normalize from there.
 - append raw events
 - normalize downstream
 - historical backfill via explicit export import, not webhook replay
+- optional attachment byte preservation via export bundles, not remote crawling
 
 ### 11.4 Email
 - query notmuch directly at synthesis or normalization time

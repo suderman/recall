@@ -5,6 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date as date_type
 from datetime import datetime, time, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,11 @@ class BlueBubblesExportResult:
     manifest_path: Path
     messages_path: Path
     message_count: int
+
+
+def _safe_attachment_name(attachment_guid: str, filename: str | None) -> str:
+    suffix = Path(filename or "attachment").name or "attachment"
+    return f"{attachment_guid}--{suffix}"
 
 
 def _parse_date(value: str) -> date_type:
@@ -88,7 +94,25 @@ def _fetch_participants(connection: sqlite3.Connection, chat_guid: str) -> list[
     return [str(row[0]) for row in rows if row[0]]
 
 
-def _fetch_attachments(connection: sqlite3.Connection, message_id: int) -> list[dict[str, Any]]:
+def _copy_attachment_file(source: Path, destination: Path) -> tuple[str, int]:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    checksum = sha256()
+    total = 0
+    with source.open("rb") as src, destination.open("wb") as dst:
+        while chunk := src.read(65536):
+            dst.write(chunk)
+            checksum.update(chunk)
+            total += len(chunk)
+    return checksum.hexdigest(), total
+
+
+def _fetch_attachments(
+    connection: sqlite3.Connection,
+    message_id: int,
+    *,
+    include_attachment_bytes: bool,
+    attachments_dir: Path,
+) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
         select
@@ -107,16 +131,30 @@ def _fetch_attachments(connection: sqlite3.Connection, message_id: int) -> list[
 
     attachments: list[dict[str, Any]] = []
     for row in rows:
-        attachments.append(
-            {
-                "guid": row["guid"],
-                "filename": row["filename"],
-                "mimeType": row["mime_type"],
-                "path": row["filename"],
-                "transferName": row["transfer_name"],
-                "totalBytes": row["total_bytes"],
-            }
-        )
+        filename = row["filename"]
+        attachment = {
+            "guid": row["guid"],
+            "filename": filename,
+            "mimeType": row["mime_type"],
+            "path": filename,
+            "transferName": row["transfer_name"],
+            "totalBytes": row["total_bytes"],
+        }
+        if include_attachment_bytes and filename:
+            source_path = Path(str(filename)).expanduser()
+            if source_path.exists() and source_path.is_file():
+                relative_path = Path("attachments") / _safe_attachment_name(
+                    str(row["guid"]), str(filename)
+                )
+                destination = attachments_dir / relative_path.name
+                checksum, size = _copy_attachment_file(source_path, destination)
+                attachment["bundleRelativePath"] = relative_path.as_posix()
+                attachment["checksums"] = {"sha256": checksum}
+                attachment["totalBytes"] = size
+            else:
+                attachment["exportError"] = f"Attachment file not found: {source_path}"
+
+        attachments.append(attachment)
     return attachments
 
 
@@ -127,6 +165,7 @@ def export_bluebubbles_history(
     from_date: str,
     to_date: str,
     export_id: str | None = None,
+    include_attachment_bytes: bool = False,
 ) -> BlueBubblesExportResult:
     database_path = messages_db.expanduser().resolve()
     if not database_path.exists():
@@ -136,6 +175,7 @@ def export_bluebubbles_history(
     if destination.exists():
         raise FileExistsError(f"Export output directory already exists: {destination}")
     destination.mkdir(parents=True, exist_ok=False)
+    attachments_dir = destination / "attachments"
 
     connection = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
@@ -160,7 +200,12 @@ def export_bluebubbles_history(
                     "displayName": chat_label,
                     "handle": handle,
                     "participants": participants,
-                    "attachments": _fetch_attachments(connection, int(row["message_id"])),
+                    "attachments": _fetch_attachments(
+                        connection,
+                        int(row["message_id"]),
+                        include_attachment_bytes=include_attachment_bytes,
+                        attachments_dir=attachments_dir,
+                    ),
                 }
             )
     finally:
@@ -174,6 +219,7 @@ def export_bluebubbles_history(
         "from": from_date,
         "to": to_date,
         "message_count": len(messages),
+        "include_attachment_bytes": include_attachment_bytes,
     }
     manifest_path = destination / "manifest.json"
     messages_path = destination / "messages.jsonl"

@@ -35,6 +35,10 @@ def copy_export_fixture(tmp_path: Path) -> Path:
 
 def build_messages_db(tmp_path: Path) -> Path:
     database_path = tmp_path / "chat.db"
+    attachment_dir = tmp_path / "attachments-src"
+    attachment_dir.mkdir(parents=True, exist_ok=True)
+    attachment_source = attachment_dir / "IMG_0999.jpeg"
+    attachment_source.write_bytes(b"jpeg-bytes")
     connection = sqlite3.connect(database_path)
     try:
         apple_epoch = datetime(2001, 1, 1, tzinfo=timezone.utc)
@@ -100,7 +104,7 @@ def build_messages_db(tmp_path: Path) -> Path:
             (
                 1,
                 "at_hist_001",
-                "/Users/jon/Library/Messages/Attachments/aa/bb/IMG_0999.jpeg",
+                str(attachment_source),
                 "image/jpeg",
                 "IMG_0999.jpeg",
                 321000,
@@ -329,3 +333,52 @@ def test_export_bluebubbles_history_writes_bundle_from_messages_db(tmp_path) -> 
     assert message["chatDisplayName"] == "Ariel"
     assert message["participants"] == ["+15551234567", "jon@icloud.com"]
     assert message["attachments"][0]["guid"] == "at_hist_001"
+
+
+def test_export_bluebubbles_history_can_copy_attachment_bytes(tmp_path) -> None:
+    database_path = build_messages_db(tmp_path)
+    output_dir = tmp_path / "export-with-attachments"
+
+    result = export_bluebubbles_history(
+        messages_db=database_path,
+        output_dir=output_dir,
+        from_date="2026-03-31",
+        to_date="2026-03-31",
+        export_id="bb_hist_20260331",
+        include_attachment_bytes=True,
+    )
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    message = json.loads(result.messages_path.read_text(encoding="utf-8").splitlines()[0])
+    attachment = message["attachments"][0]
+    bundle_path = output_dir / attachment["bundleRelativePath"]
+
+    assert manifest["include_attachment_bytes"] is True
+    assert attachment["checksums"]["sha256"]
+    assert bundle_path.exists()
+    assert bundle_path.read_bytes() == b"jpeg-bytes"
+
+
+def test_normalize_bluebubbles_day_marks_imported_attachment_bytes(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    database_path = build_messages_db(tmp_path)
+    export_dir = tmp_path / "export-with-attachments"
+    export_bluebubbles_history(
+        messages_db=database_path,
+        output_dir=export_dir,
+        from_date="2026-03-31",
+        to_date="2026-03-31",
+        export_id="bb_hist_20260331",
+        include_attachment_bytes=True,
+    )
+    import_bluebubbles_export(paths, export_path=export_dir, account="personal")
+
+    _, artifact_path = normalize_bluebubbles_day(paths, date="2026-03-31")
+
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8").splitlines()[0])
+    assert artifact["download_status"] == "imported"
+    assert artifact["local_path"] == (
+        "data/raw/bluebubbles/imports/bb_hist_20260331/attachments/at_hist_001--IMG_0999.jpeg"
+    )
+    assert artifact["checksums"]["sha256"]
+    assert artifact["last_error"] is None

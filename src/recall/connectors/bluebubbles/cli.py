@@ -140,6 +140,11 @@ def export_bluebubbles_history_bundle(
         help="Path to the local macOS Messages database on the export machine.",
     ),
     export_id: str | None = typer.Option(None, "--export-id", help="Stable export identifier."),
+    include_attachment_bytes: bool = typer.Option(
+        False,
+        "--include-attachment-bytes",
+        help="Copy locally available attachment files into the export bundle.",
+    ),
 ) -> None:
     """Export historical BlueBubbles-compatible message history from the local Messages DB."""
 
@@ -149,6 +154,7 @@ def export_bluebubbles_history_bundle(
         from_date=from_date,
         to_date=to_date,
         export_id=export_id,
+        include_attachment_bytes=include_attachment_bytes,
     )
     typer.echo("mode=export")
     typer.echo(f"messages_db={messages_db.expanduser().resolve()}")
@@ -156,6 +162,7 @@ def export_bluebubbles_history_bundle(
     typer.echo(f"manifest={result.manifest_path}")
     typer.echo(f"messages={result.messages_path}")
     typer.echo(f"message_count={result.message_count}")
+    typer.echo(f"include_attachment_bytes={str(include_attachment_bytes).lower()}")
     typer.echo(
         "next_step=copy this export bundle to Recall and run "
         "'recall import bluebubbles-export <path>'"

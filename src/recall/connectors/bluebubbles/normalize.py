@@ -116,6 +116,7 @@ def _attachment_artifacts(
     timestamp: str,
     raw_path: str,
     attachments: list[dict[str, Any]],
+    local_base_path: str | None = None,
 ) -> list[NormalizedArtifact]:
     artifacts: list[NormalizedArtifact] = []
     for index, attachment in enumerate(attachments):
@@ -148,8 +149,20 @@ def _attachment_artifacts(
                 mime_type=attachment.get("mimeType") or attachment.get("mime_type"),
                 filename=attachment.get("filename") or attachment.get("transferName"),
                 size_bytes=int(attachment["totalBytes"]) if attachment.get("totalBytes") else None,
-                checksums={},
-                download_status="not_requested",
+                local_path=(
+                    f"{local_base_path}/{attachment['bundleRelativePath']}"
+                    if local_base_path and attachment.get("bundleRelativePath")
+                    else None
+                ),
+                checksums=dict(attachment.get("checksums") or {}),
+                download_status=(
+                    "imported"
+                    if local_base_path and attachment.get("bundleRelativePath")
+                    else "not_requested"
+                ),
+                last_error=str(attachment.get("exportError"))
+                if attachment.get("exportError")
+                else None,
                 observed_at=timestamp,
                 raw_ref=raw_ref,
             )
@@ -188,6 +201,11 @@ def normalize_bluebubbles_day(paths: RecallPaths, *, date: str) -> tuple[Path, P
         )
         text = str(data.get("text") or "")
         attachments = [item for item in (data.get("attachments") or []) if isinstance(item, dict)]
+        local_base_path = None
+        if row.get("capture_mode") == "import" and row.get("import_id"):
+            local_base_path = paths.relative_to_root(
+                paths.raw_import_dir("bluebubbles", str(row["import_id"]))
+            )
         event_artifacts = _attachment_artifacts(
             account=str(row.get("account") or "personal"),
             event_id=event_id,
@@ -196,6 +214,7 @@ def normalize_bluebubbles_day(paths: RecallPaths, *, date: str) -> tuple[Path, P
             timestamp=timestamp,
             raw_path=raw_path,
             attachments=attachments,
+            local_base_path=local_base_path,
         )
         artifacts.extend(event_artifacts)
         events.append(

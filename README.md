@@ -310,7 +310,8 @@ Recall webhook URL on your LAN. Use the Recall host's reachable LAN IP, not
 
 For historical BlueBubbles backfill, export a bundle on the Mac first, then
 import it into Recall. The export bundle should contain `manifest.json` and
-`messages.jsonl` at the top level.
+`messages.jsonl` at the top level. If you want attachment bytes copied into the
+bundle too, pass `--include-attachment-bytes` during export.
 
 Minimal macOS environment steps required to achieve BlueBubbles export:
 
@@ -330,7 +331,8 @@ uv pip install -e .
 # export a BlueBubbles-compatible bundle from the local Messages database
 recall export bluebubbles-history ~/exports/recall/bluebubbles-history-YYYY-MM-DD_YYYY-MM-DD \
   --from YYYY-MM-DD \
-  --to YYYY-MM-DD
+  --to YYYY-MM-DD \
+  --include-attachment-bytes
 ```
 
 This path is intended for a minimal macOS export machine like an old MacBook.
