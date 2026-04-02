@@ -150,6 +150,40 @@ These are current known sources and how they should fit.
 
 ---
 
+## Progress checklist
+
+Keep this section current as implementation advances.
+
+### Done
+
+- [x] Slack daily capture CLI with raw storage, normalization, artifact metadata, and artifact byte download support
+- [x] BlueBubbles webhook capture, normalization, historical export import, and artifact byte download support
+- [x] Telegram TDLib capture with append, once, run, and daemon commands
+- [x] Telegram Desktop export import/backfill for extracted directories and zip bundles
+- [x] Telegram normalization for text, photos, documents, voice notes, video, animation, audio, stickers, and video notes
+- [x] Telegram artifact byte download support using local-path, file-id, and remote-id fallback through TDLib
+- [x] SQLite-backed people, identities, aliases, identity aliases, and resolutions storage
+- [x] Entity inspection CLI: `recall entities show people|identities|resolutions`
+- [x] First-pass cross-source entity matching plus manual override config for identity resolutions and person merges
+- [x] Temporal identity-resolution guidance documented for reused addresses and role accounts
+- [x] Telegram auth prompting, quieter TDLib defaults, and systemd user service example
+
+### Pending
+
+- [ ] Email/notmuch normalization and entity extraction
+- [ ] Calendar/khal normalization
+- [ ] Asana import and normalization
+- [ ] Timestamp-aware resolution application in normalization/enrichment using `valid_from` and `valid_to`
+- [ ] Suggested-match review workflow for ambiguous cross-source identities
+- [ ] CLI to inspect unresolved identities and proposed matches
+- [ ] Broader Telegram validation with real-world forwards, service messages, channels, and large media/documents
+- [ ] Telegram artifact coverage validation for real animation/video-note/sticker downloads
+- [ ] Date-range rebuild and backfill orchestration commands across connectors
+- [ ] Deduplication logic across overlapping sources and imports
+- [ ] Derived journal/worklog/timeline synthesis on top of normalized events and entities
+
+---
+
 ## Recommended repository responsibilities
 
 This repository should own:
