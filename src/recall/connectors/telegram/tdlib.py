@@ -461,8 +461,18 @@ class TdlibTelegramClient(TelegramCaptureClient):
             return {"@type": "fileTypePhoto"}
         if kind == "document":
             return {"@type": "fileTypeDocument"}
+        if kind == "video":
+            return {"@type": "fileTypeVideo"}
+        if kind == "animation":
+            return {"@type": "fileTypeAnimation"}
+        if kind == "audio":
+            return {"@type": "fileTypeAudio"}
         if kind == "voice_note":
             return {"@type": "fileTypeVoiceNote"}
+        if kind == "video_note":
+            return {"@type": "fileTypeVideoNote"}
+        if kind == "sticker":
+            return {"@type": "fileTypeSticker"}
         return {"@type": "fileTypeUnknown"}
 
     def _get_chat(self, chat_id: int) -> dict[str, Any] | None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import zipfile
 from pathlib import Path
 
 from recall.connectors.telegram.artifacts import download_telegram_artifacts
@@ -104,6 +105,12 @@ def copy_fixture_capture(tmp_path: Path) -> RecallPaths:
     target_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(FIXTURE_DIR / "updates.jsonl", target_dir / "updates.jsonl")
     return paths
+
+
+def copy_telegram_export_fixture(tmp_path: Path) -> Path:
+    export_root = tmp_path / "telegram-export"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "telegram_export", export_root)
+    return export_root
 
 
 def test_normalize_telegram_day_writes_events_and_artifacts(tmp_path) -> None:
@@ -365,6 +372,217 @@ def test_normalize_telegram_tdlib_photo_uses_nested_file_metadata(tmp_path) -> N
         {"kind": "remote_id", "value": "remote-large"},
         {"kind": "remote_unique_id", "value": "unique-large"},
     ]
+
+
+def test_normalize_telegram_tdlib_document_zip_uses_nested_file_metadata(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    target_dir = paths.raw_capture_dir("telegram", "2026-04-05")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "updates.jsonl").write_text(
+        json.dumps(
+            {
+                "account": "personal",
+                "payload": {
+                    "message": {
+                        "chat_id": 1004,
+                        "content": {
+                            "@type": "messageDocument",
+                            "caption": {"text": "zip attachment"},
+                            "document": {
+                                "file_name": "archive.zip",
+                                "mime_type": "application/zip",
+                                "document": {
+                                    "id": 1301,
+                                    "expected_size": 54321,
+                                    "local": {
+                                        "path": "/tmp/archive.zip",
+                                        "is_downloading_completed": False,
+                                    },
+                                    "remote": {
+                                        "id": "remote-zip",
+                                        "unique_id": "unique-zip",
+                                    },
+                                },
+                            },
+                        },
+                        "date": 1774976467,
+                        "id": 9302,
+                        "sender_id": {"@type": "messageSenderUser", "user_id": 42},
+                    }
+                },
+                "received_at": "2026-04-05T10:00:01Z",
+                "source": "telegram",
+                "update_type": "updateNewMessage",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    event_path, artifact_path = normalize_telegram_day(paths, date="2026-04-05")
+
+    event = json.loads(event_path.read_text(encoding="utf-8").splitlines()[0])
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8").splitlines()[0])
+    assert event["text"] == "zip attachment"
+    assert "document" in event["tags"]
+    assert artifact["kind"] == "document"
+    assert artifact["source_object_id"] == "1301"
+    assert artifact["filename"] == "archive.zip"
+    assert artifact["mime_type"] == "application/zip"
+    assert artifact["size_bytes"] == 54321
+    assert artifact["remote_locators"] == [
+        {"kind": "local_path", "value": "/tmp/archive.zip"},
+        {"kind": "remote_id", "value": "remote-zip"},
+        {"kind": "remote_unique_id", "value": "unique-zip"},
+    ]
+
+
+def test_normalize_telegram_supports_video_audio_sticker_and_video_note(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    target_dir = paths.raw_capture_dir("telegram", "2026-04-06")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {
+            "account": "personal",
+            "payload": {
+                "message": {
+                    "chat_id": 1005,
+                    "content": {
+                        "@type": "messageVideo",
+                        "caption": {"text": "video caption"},
+                        "video": {
+                            "file_name": "clip.mp4",
+                            "mime_type": "video/mp4",
+                            "video": {
+                                "id": 2001,
+                                "expected_size": 111,
+                                "local": {"path": "/tmp/clip.mp4"},
+                                "remote": {"id": "remote-video", "unique_id": "unique-video"},
+                            },
+                        },
+                    },
+                    "date": 1774976467,
+                    "id": 9401,
+                    "sender_id": {"@type": "messageSenderUser", "user_id": 42},
+                }
+            },
+            "received_at": "2026-04-06T10:00:00Z",
+            "source": "telegram",
+            "update_type": "updateNewMessage",
+        },
+        {
+            "account": "personal",
+            "payload": {
+                "message": {
+                    "chat_id": 1005,
+                    "content": {
+                        "@type": "messageAudio",
+                        "caption": {"text": "audio caption"},
+                        "audio": {
+                            "file_name": "song.mp3",
+                            "mime_type": "audio/mpeg",
+                            "audio": {
+                                "id": 2002,
+                                "expected_size": 222,
+                                "local": {"path": "/tmp/song.mp3"},
+                                "remote": {"id": "remote-audio", "unique_id": "unique-audio"},
+                            },
+                        },
+                    },
+                    "date": 1774976468,
+                    "id": 9402,
+                    "sender_id": {"@type": "messageSenderUser", "user_id": 42},
+                }
+            },
+            "received_at": "2026-04-06T10:00:01Z",
+            "source": "telegram",
+            "update_type": "updateNewMessage",
+        },
+        {
+            "account": "personal",
+            "payload": {
+                "message": {
+                    "chat_id": 1005,
+                    "content": {
+                        "@type": "messageSticker",
+                        "sticker": {
+                            "emoji": "🙂",
+                            "set_name": "funny_pack",
+                            "format": {"@type": "stickerFormatWebp"},
+                            "sticker": {
+                                "id": 2003,
+                                "expected_size": 333,
+                                "local": {"path": "/tmp/sticker.webp"},
+                                "remote": {"id": "remote-sticker", "unique_id": "unique-sticker"},
+                            },
+                        },
+                    },
+                    "date": 1774976469,
+                    "id": 9403,
+                    "sender_id": {"@type": "messageSenderUser", "user_id": 42},
+                }
+            },
+            "received_at": "2026-04-06T10:00:02Z",
+            "source": "telegram",
+            "update_type": "updateNewMessage",
+        },
+        {
+            "account": "personal",
+            "payload": {
+                "message": {
+                    "chat_id": 1005,
+                    "content": {
+                        "@type": "messageVideoNote",
+                        "caption": {"text": ""},
+                        "video_note": {
+                            "video": {
+                                "id": 2004,
+                                "expected_size": 444,
+                                "local": {"path": "/tmp/video-note.mp4"},
+                                "remote": {
+                                    "id": "remote-video-note",
+                                    "unique_id": "unique-video-note",
+                                },
+                            }
+                        },
+                    },
+                    "date": 1774976470,
+                    "id": 9404,
+                    "sender_id": {"@type": "messageSenderUser", "user_id": 42},
+                }
+            },
+            "received_at": "2026-04-06T10:00:03Z",
+            "source": "telegram",
+            "update_type": "updateNewMessage",
+        },
+    ]
+    (target_dir / "updates.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+
+    event_path, artifact_path = normalize_telegram_day(paths, date="2026-04-06")
+    events = [json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()]
+    artifacts = [
+        json.loads(line) for line in artifact_path.read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert [artifact["kind"] for artifact in artifacts] == [
+        "video",
+        "audio",
+        "sticker",
+        "video_note",
+    ]
+    assert artifacts[0]["filename"] == "clip.mp4"
+    assert artifacts[1]["mime_type"] == "audio/mpeg"
+    assert artifacts[2]["filename"] == "funny_pack"
+    assert artifacts[2]["mime_type"] == "stickerFormatWebp"
+    assert artifacts[3]["source_object_id"] == "2004"
+    assert "video" in events[0]["tags"]
+    assert "audio" in events[1]["tags"]
+    assert events[2]["text"] == "🙂"
+    assert "sticker" in events[2]["tags"]
+    assert "video_note" in events[3]["tags"]
 
 
 def test_sync_telegram_entities_persists_users_chats_and_aliases(tmp_path) -> None:
@@ -750,6 +968,57 @@ def test_download_telegram_artifacts_dry_run_does_not_call_tdlib(tmp_path) -> No
 
     assert result.would_download == 1
     assert result.failed == 0
+
+
+def test_import_telegram_export_directory_writes_import_and_raw_updates(tmp_path) -> None:
+    from recall.connectors.telegram.importer import import_telegram_export
+
+    paths = RecallPaths.from_root(tmp_path)
+    export_root = copy_telegram_export_fixture(tmp_path)
+
+    result = import_telegram_export(paths, export_path=export_root, account="personal")
+
+    assert result.messages_imported == 2
+    assert result.dates_written == ["2026-04-02"]
+    assert (result.import_dir / "result.json").exists()
+    assert (result.import_dir / "files" / "archive.zip").read_text(
+        encoding="utf-8"
+    ) == "fake-zip-bytes\n"
+
+    raw_updates = (paths.raw_capture_dir("telegram", "2026-04-02") / "updates.jsonl").read_text(
+        encoding="utf-8"
+    )
+    rows = [json.loads(line) for line in raw_updates.splitlines()]
+    assert len(rows) == 2
+    assert rows[0]["capture_mode"] == "import"
+    assert rows[1]["payload"]["message"]["content"]["@type"] == "messageDocument"
+    assert rows[1]["payload"]["message"]["content"]["document"]["document"]["local"][
+        "path"
+    ].endswith("files/archive.zip")
+
+
+def test_import_telegram_export_zip_writes_import_and_can_normalize(tmp_path) -> None:
+    from recall.connectors.telegram.importer import import_telegram_export
+
+    paths = RecallPaths.from_root(tmp_path)
+    export_root = copy_telegram_export_fixture(tmp_path)
+    zip_path = tmp_path / "telegram-export.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        for file_path in export_root.rglob("*"):
+            if file_path.is_file():
+                archive.write(file_path, file_path.relative_to(export_root))
+
+    result = import_telegram_export(paths, export_path=zip_path, account="personal")
+
+    assert result.messages_imported == 2
+    event_path, artifact_path = normalize_telegram_day(paths, date="2026-04-02")
+    events = [json.loads(line) for line in event_path.read_text(encoding="utf-8").splitlines()]
+    artifacts = [
+        json.loads(line) for line in artifact_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(events) == 2
+    assert artifacts[0]["kind"] == "document"
+    assert artifacts[0]["filename"] == "archive.zip"
 
 
 def test_tdlib_client_download_remote_file_tries_unknown_then_typed(tmp_path) -> None:

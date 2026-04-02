@@ -36,6 +36,7 @@ from recall.connectors.telegram.cli import (
     append_telegram,
     capture_telegram_once,
     capture_telegram_tdlib_once,
+    import_telegram_export_bundle,
     normalize_telegram,
     run_telegram_capture,
     run_telegram_tdlib_daemon,
@@ -163,6 +164,7 @@ entities_app.command("match")(run_entity_matching)
 state_show_app.command("slack")(show_slack_state)
 state_show_app.command("telegram")(show_telegram_state)
 import_app.command("bluebubbles-export")(import_bluebubbles_export_bundle)
+import_app.command("telegram-export")(import_telegram_export_bundle)
 export_app.command("bluebubbles-history")(export_bluebubbles_history_bundle)
 
 

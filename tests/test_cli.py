@@ -856,6 +856,21 @@ def test_entities_match_applies_cross_source_resolution(tmp_path) -> None:
     assert identity == ("person_telegram_user_42",)
 
 
+def test_import_telegram_export_bundle_reports_dates(tmp_path) -> None:
+    export_root = tmp_path / "telegram-export"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "telegram_export", export_root)
+
+    result = runner.invoke(
+        app,
+        ["import", "telegram-export", str(export_root), "--root", str(tmp_path)],
+    )
+
+    assert result.exit_code == 0
+    assert "mode=import" in result.stdout
+    assert "messages_imported=2" in result.stdout
+    assert "dates_written=2026-04-02" in result.stdout
+
+
 def test_state_show_slack_reports_empty_state(tmp_path) -> None:
     result = runner.invoke(app, ["state", "show", "slack", "--root", str(tmp_path)])
 

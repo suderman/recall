@@ -166,9 +166,24 @@ def _extract_text_and_tags(content: dict[str, Any]) -> tuple[str, list[str]]:
     if content_type == "messageDocument":
         caption = content.get("caption", {}).get("text")
         return str(caption or ""), tags + ["document"]
+    if content_type == "messageVideo":
+        caption = content.get("caption", {}).get("text")
+        return str(caption or ""), tags + ["video"]
+    if content_type == "messageAnimation":
+        caption = content.get("caption", {}).get("text")
+        return str(caption or ""), tags + ["animation"]
+    if content_type == "messageAudio":
+        caption = content.get("caption", {}).get("text")
+        return str(caption or ""), tags + ["audio"]
     if content_type == "messageVoiceNote":
         caption = content.get("caption", {}).get("text")
         return str(caption or ""), tags + ["voice_note"]
+    if content_type == "messageVideoNote":
+        caption = content.get("caption", {}).get("text")
+        return str(caption or ""), tags + ["video_note"]
+    if content_type == "messageSticker":
+        emoji = str(content.get("sticker", {}).get("emoji") or "").strip()
+        return emoji, tags + ["sticker"]
     return str(content.get("caption", {}).get("text") or ""), tags
 
 
@@ -268,6 +283,45 @@ def _file_details(content: dict[str, Any]) -> tuple[str, dict[str, Any], dict[st
             }
             return ("document", nested, metadata)
         return ("document", document, {})
+    if content_type == "messageVideo":
+        video = content.get("video") or {}
+        if not isinstance(video, dict):
+            return None
+        nested = video.get("video")
+        if isinstance(nested, dict):
+            metadata = {
+                "filename": video.get("file_name"),
+                "mime_type": video.get("mime_type"),
+                "size_bytes": nested.get("expected_size") or video.get("size"),
+            }
+            return ("video", nested, metadata)
+        return ("video", video, {})
+    if content_type == "messageAnimation":
+        animation = content.get("animation") or {}
+        if not isinstance(animation, dict):
+            return None
+        nested = animation.get("animation")
+        if isinstance(nested, dict):
+            metadata = {
+                "filename": animation.get("file_name"),
+                "mime_type": animation.get("mime_type"),
+                "size_bytes": nested.get("expected_size") or animation.get("size"),
+            }
+            return ("animation", nested, metadata)
+        return ("animation", animation, {})
+    if content_type == "messageAudio":
+        audio = content.get("audio") or {}
+        if not isinstance(audio, dict):
+            return None
+        nested = audio.get("audio")
+        if isinstance(nested, dict):
+            metadata = {
+                "filename": audio.get("file_name"),
+                "mime_type": audio.get("mime_type"),
+                "size_bytes": nested.get("expected_size") or audio.get("size"),
+            }
+            return ("audio", nested, metadata)
+        return ("audio", audio, {})
     if content_type == "messageVoiceNote":
         voice_note = content.get("voice_note") or {}
         if not isinstance(voice_note, dict):
@@ -281,6 +335,32 @@ def _file_details(content: dict[str, Any]) -> tuple[str, dict[str, Any], dict[st
             }
             return ("voice_note", nested, metadata)
         return ("voice_note", voice_note, {})
+    if content_type == "messageVideoNote":
+        video_note = content.get("video_note") or {}
+        if not isinstance(video_note, dict):
+            return None
+        nested = video_note.get("video")
+        if isinstance(nested, dict):
+            metadata = {
+                "filename": video_note.get("file_name"),
+                "mime_type": video_note.get("mime_type"),
+                "size_bytes": nested.get("expected_size") or video_note.get("size"),
+            }
+            return ("video_note", nested, metadata)
+        return ("video_note", video_note, {})
+    if content_type == "messageSticker":
+        sticker = content.get("sticker") or {}
+        if not isinstance(sticker, dict):
+            return None
+        nested = sticker.get("sticker")
+        if isinstance(nested, dict):
+            metadata = {
+                "filename": sticker.get("set_name") or sticker.get("emoji"),
+                "mime_type": sticker.get("format", {}).get("@type"),
+                "size_bytes": nested.get("expected_size") or sticker.get("size"),
+            }
+            return ("sticker", nested, metadata)
+        return ("sticker", sticker, {})
     return None
 
 

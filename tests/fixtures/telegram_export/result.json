@@ -1,0 +1,37 @@
+{
+  "about": "Telegram Desktop export",
+  "name": "Telegram Test Export",
+  "type": "personal_chat",
+  "chats": {
+    "list": [
+      {
+        "id": 1001,
+        "name": "Ariel Example",
+        "type": "personal_chat",
+        "messages": [
+          {
+            "id": 9001,
+            "type": "message",
+            "date": "2026-04-02T17:41:00",
+            "date_unixtime": "1775151660",
+            "from": "Jon Suderman",
+            "from_id": "user118682632",
+            "text": "Imported text message"
+          },
+          {
+            "id": 9002,
+            "type": "message",
+            "date": "2026-04-02T17:42:00",
+            "date_unixtime": "1775151720",
+            "from": "Ariel Example",
+            "from_id": "user132869235",
+            "text": "Historical zip attachment",
+            "file": "files/archive.zip",
+            "media_type": "document",
+            "mime_type": "application/zip"
+          }
+        ]
+      }
+    ]
+  }
+}

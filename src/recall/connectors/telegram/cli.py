@@ -17,6 +17,7 @@ from recall.connectors.telegram.config import load_telegram_config
 from recall.connectors.telegram.entities import (
     sync_telegram_entities as sync_telegram_entities_for_date,
 )
+from recall.connectors.telegram.importer import import_telegram_export
 from recall.connectors.telegram.normalize import normalize_telegram_day
 from recall.connectors.telegram.tdlib import (
     TdlibJsonTransport,
@@ -522,3 +523,33 @@ def show_telegram_state(
         typer.echo(f"cursor_key={cursor.cursor_key}")
         typer.echo(f"cursor_value={cursor.cursor_value}")
         typer.echo(f"updated_at={cursor.updated_at}")
+
+
+def import_telegram_export_bundle(
+    export_path: Path = typer.Argument(..., exists=True, resolve_path=True),
+    account: str | None = typer.Option(None, "--account", help="Telegram account label to record."),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+) -> None:
+    """Import a Telegram Desktop JSON export bundle into raw storage."""
+
+    paths = _paths_for(root)
+    paths.ensure_directories()
+    config = load_telegram_config(paths)
+    result = import_telegram_export(
+        paths,
+        export_path=export_path,
+        account=account or config.account,
+    )
+    typer.echo("mode=import")
+    typer.echo(f"import_id={result.import_id}")
+    typer.echo(f"import_dir={result.import_dir}")
+    typer.echo(f"messages_imported={result.messages_imported}")
+    typer.echo("dates_written=" + (",".join(result.dates_written) if result.dates_written else "-"))
+    typer.echo("next_step=run 'recall normalize telegram --date YYYY-MM-DD' for each imported date")
