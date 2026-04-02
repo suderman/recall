@@ -16,6 +16,11 @@ from recall.connectors.telegram.entities import (
     sync_telegram_entities as sync_telegram_entities_for_date,
 )
 from recall.connectors.telegram.normalize import normalize_telegram_day
+from recall.connectors.telegram.tdlib import (
+    TdlibJsonTransport,
+    TdlibTelegramClient,
+    build_tdlib_auth_settings,
+)
 from recall.storage.paths import RecallPaths
 from recall.storage.state import list_connector_cursors
 
@@ -47,6 +52,47 @@ def _capture_updates_from_file(
     typer.echo(f"mode={mode}")
     typer.echo(f"account={account}")
     typer.echo(f"updates_file={updates_file}")
+    typer.echo(f"after_update_id={after_update_id if after_update_id is not None else '-'}")
+    typer.echo(f"captured_updates={result.captured_updates}")
+    typer.echo("dates_written=" + (",".join(result.dates_written) if result.dates_written else "-"))
+    typer.echo(
+        f"last_update_id={result.last_update_id if result.last_update_id is not None else '-'}"
+    )
+    if result.cursor is not None:
+        typer.echo(f"cursor_key={result.cursor.cursor_key}")
+        typer.echo(f"cursor_value={result.cursor.cursor_value}")
+    typer.echo("next_step=run 'recall normalize telegram --date YYYY-MM-DD'")
+
+
+def _capture_updates_from_tdlib(
+    *,
+    account: str,
+    root: Path | None,
+    after_update_id: int | None,
+    limit: int | None,
+    mode: str,
+) -> None:
+    paths = _paths_for(root)
+    paths.ensure_directories()
+    config = load_telegram_config(paths)
+    settings = build_tdlib_auth_settings(paths, config, account=account)
+    transport = TdlibJsonTransport(library_path=settings.library_path)
+    client = TdlibTelegramClient(transport=transport, settings=settings)
+    try:
+        result = capture_telegram_updates(
+            paths,
+            client=client,
+            account=account,
+            after_update_id=after_update_id,
+            limit=limit,
+            capture_mode=mode,
+        )
+    finally:
+        client.close()
+
+    typer.echo(f"mode={mode}")
+    typer.echo(f"account={account}")
+    typer.echo("transport=tdlib")
     typer.echo(f"after_update_id={after_update_id if after_update_id is not None else '-'}")
     typer.echo(f"captured_updates={result.captured_updates}")
     typer.echo("dates_written=" + (",".join(result.dates_written) if result.dates_written else "-"))
@@ -172,6 +218,72 @@ def run_telegram_capture(
         after_update_id=after_update_id,
         limit=max_updates,
         mode="run",
+    )
+
+
+def capture_telegram_tdlib_once(
+    account: str | None = typer.Option(None, "--account", help="Telegram account label to record."),
+    after_update_id: int | None = typer.Option(
+        None,
+        "--after-update-id",
+        help="Only capture updates newer than this id.",
+    ),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+) -> None:
+    """Capture one Telegram update directly from TDLib."""
+
+    paths = _paths_for(root)
+    config = load_telegram_config(paths)
+    resolved_account = account or config.account
+    _capture_updates_from_tdlib(
+        account=resolved_account,
+        root=root,
+        after_update_id=after_update_id,
+        limit=1,
+        mode="tdlib-once",
+    )
+
+
+def run_telegram_tdlib_capture(
+    account: str | None = typer.Option(None, "--account", help="Telegram account label to record."),
+    after_update_id: int | None = typer.Option(
+        None,
+        "--after-update-id",
+        help="Only capture updates newer than this id.",
+    ),
+    max_updates: int | None = typer.Option(
+        None,
+        "--max-updates",
+        min=1,
+        help="Stop after capturing this many updates.",
+    ),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+) -> None:
+    """Capture a batch of Telegram updates directly from TDLib."""
+
+    paths = _paths_for(root)
+    config = load_telegram_config(paths)
+    resolved_account = account or config.account
+    _capture_updates_from_tdlib(
+        account=resolved_account,
+        root=root,
+        after_update_id=after_update_id,
+        limit=max_updates,
+        mode="tdlib-run",
     )
 
 

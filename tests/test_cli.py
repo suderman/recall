@@ -531,6 +531,50 @@ def test_capture_telegram_run_respects_after_update_id(tmp_path) -> None:
     assert "cursor_value=12346" in result.stdout
 
 
+def test_capture_telegram_tdlib_once_reports_tdlib_transport(tmp_path, monkeypatch) -> None:
+    import recall.connectors.telegram.cli as telegram_cli
+
+    def fake_capture(**kwargs):
+        del kwargs
+        typer = __import__("typer")
+        typer.echo("mode=tdlib-once")
+        typer.echo("transport=tdlib")
+        typer.echo("captured_updates=1")
+        typer.echo("last_update_id=77")
+
+    monkeypatch.setattr(telegram_cli, "_capture_updates_from_tdlib", fake_capture)
+
+    result = runner.invoke(app, ["capture", "telegram", "tdlib-once", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "mode=tdlib-once" in result.stdout
+    assert "transport=tdlib" in result.stdout
+    assert "captured_updates=1" in result.stdout
+
+
+def test_capture_telegram_tdlib_run_reports_tdlib_transport(tmp_path, monkeypatch) -> None:
+    import recall.connectors.telegram.cli as telegram_cli
+
+    def fake_capture(**kwargs):
+        del kwargs
+        typer = __import__("typer")
+        typer.echo("mode=tdlib-run")
+        typer.echo("transport=tdlib")
+        typer.echo("captured_updates=2")
+
+    monkeypatch.setattr(telegram_cli, "_capture_updates_from_tdlib", fake_capture)
+
+    result = runner.invoke(
+        app,
+        ["capture", "telegram", "tdlib-run", "--root", str(tmp_path), "--max-updates", "2"],
+    )
+
+    assert result.exit_code == 0
+    assert "mode=tdlib-run" in result.stdout
+    assert "transport=tdlib" in result.stdout
+    assert "captured_updates=2" in result.stdout
+
+
 def test_entities_sync_telegram_persists_identity_rows(tmp_path) -> None:
     paths = _copy_telegram_fixture_capture(tmp_path)
 

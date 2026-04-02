@@ -28,8 +28,10 @@ from recall.connectors.slack.cli import (
 from recall.connectors.telegram.cli import (
     append_telegram,
     capture_telegram_once,
+    capture_telegram_tdlib_once,
     normalize_telegram,
     run_telegram_capture,
+    run_telegram_tdlib_capture,
     show_telegram_state,
     sync_telegram_entities,
 )
@@ -130,6 +132,8 @@ bluebubbles_capture_app.command("serve")(serve_bluebubbles)
 telegram_capture_app.command("append")(append_telegram)
 telegram_capture_app.command("once")(capture_telegram_once)
 telegram_capture_app.command("run")(run_telegram_capture)
+telegram_capture_app.command("tdlib-once")(capture_telegram_tdlib_once)
+telegram_capture_app.command("tdlib-run")(run_telegram_tdlib_capture)
 normalize_app.command("slack")(normalize_slack)
 normalize_app.command("bluebubbles")(normalize_bluebubbles)
 normalize_app.command("telegram")(normalize_telegram)

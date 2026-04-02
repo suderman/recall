@@ -11,11 +11,58 @@ from recall.connectors.telegram.capture import (
     load_update_payload,
 )
 from recall.connectors.telegram.client import FileTelegramClient
+from recall.connectors.telegram.config import TelegramSourceConfig
 from recall.connectors.telegram.entities import sync_telegram_entities
 from recall.connectors.telegram.normalize import normalize_telegram_day
+from recall.connectors.telegram.tdlib import (
+    TdlibAuthSettings,
+    TdlibTelegramClient,
+    build_tdlib_auth_settings,
+)
 from recall.storage.paths import RecallPaths
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "telegram"
+
+
+class FakeTdlibTransport:
+    def __init__(
+        self, responses: list[dict], *, execute_responses: dict[tuple[str, int], dict] | None = None
+    ):
+        self.responses = list(responses)
+        self.execute_responses = execute_responses or {}
+        self.sent: list[dict] = []
+        self.executed: list[dict] = []
+        self.closed = False
+
+    def send(self, query: dict) -> None:
+        self.sent.append(query)
+
+    def receive(self, timeout: float) -> dict | None:
+        del timeout
+        if not self.responses:
+            return None
+        return self.responses.pop(0)
+
+    def execute(self, query: dict) -> dict | None:
+        self.executed.append(query)
+        key = (str(query.get("@type")), int(query.get("chat_id") or query.get("user_id") or 0))
+        return self.execute_responses.get(key)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _tdlib_settings(tmp_path: Path) -> TdlibAuthSettings:
+    return TdlibAuthSettings(
+        account="personal",
+        api_id=123,
+        api_hash="hash",
+        phone_number="+15551234567",
+        database_directory=tmp_path / "tdlib" / "db",
+        files_directory=tmp_path / "tdlib" / "files",
+        code="12345",
+        password="secret",
+    )
 
 
 def copy_fixture_capture(tmp_path: Path) -> RecallPaths:
@@ -190,3 +237,119 @@ def test_capture_telegram_updates_appends_batch_and_tracks_cursor(tmp_path) -> N
     assert len(rows) == 1
     assert rows[0]["capture_mode"] == "run"
     assert rows[0]["update_id"] == 12346
+
+
+def test_build_tdlib_auth_settings_reads_env_and_state_paths(tmp_path, monkeypatch) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    monkeypatch.setenv("TELEGRAM_API_ID", "123456")
+    monkeypatch.setenv("TELEGRAM_API_HASH", "hash-value")
+    monkeypatch.setenv("TELEGRAM_PHONE_NUMBER", "+15551234567")
+    monkeypatch.setenv("TELEGRAM_AUTH_CODE", "99999")
+    monkeypatch.setenv("TELEGRAM_AUTH_PASSWORD", "password")
+
+    settings = build_tdlib_auth_settings(paths, TelegramSourceConfig(), account="work")
+
+    assert settings.api_id == 123456
+    assert settings.api_hash == "hash-value"
+    assert settings.phone_number == "+15551234567"
+    assert settings.code == "99999"
+    assert settings.password == "password"
+    assert settings.database_directory == tmp_path / "data/state/telegram/tdlib/work/database"
+    assert settings.files_directory == tmp_path / "data/state/telegram/tdlib/work/files"
+
+
+def test_tdlib_client_authenticates_and_enriches_update(tmp_path) -> None:
+    transport = FakeTdlibTransport(
+        [
+            {
+                "@type": "updateAuthorizationState",
+                "authorization_state": {"@type": "authorizationStateWaitTdlibParameters"},
+            },
+            {
+                "@type": "updateAuthorizationState",
+                "authorization_state": {"@type": "authorizationStateWaitPhoneNumber"},
+            },
+            {
+                "@type": "updateAuthorizationState",
+                "authorization_state": {"@type": "authorizationStateWaitCode"},
+            },
+            {
+                "@type": "updateAuthorizationState",
+                "authorization_state": {"@type": "authorizationStateWaitPassword"},
+            },
+            {
+                "@type": "updateAuthorizationState",
+                "authorization_state": {"@type": "authorizationStateReady"},
+            },
+            {
+                "@type": "updateNewMessage",
+                "message": {
+                    "id": 9103,
+                    "chat_id": 1001,
+                    "sender_id": {"@type": "messageSenderUser", "user_id": 42},
+                    "content": {"@type": "messageText", "text": {"text": "hello tdlib"}},
+                },
+            },
+        ],
+        execute_responses={
+            ("getChat", 1001): {"id": 1001, "title": "Ariel", "participant_user_ids": [42]},
+            (
+                "getUser",
+                42,
+            ): {"id": 42, "first_name": "Ariel", "last_name": "Example", "usernames": ["ariel"]},
+        },
+    )
+    client = TdlibTelegramClient(
+        transport=transport,
+        settings=_tdlib_settings(tmp_path),
+        auth_timeout_seconds=1.0,
+        receive_timeout_seconds=0.01,
+    )
+
+    updates = client.get_updates(after_update_id=10, limit=1)
+
+    assert len(updates) == 1
+    update = updates[0]
+    assert update.update_type == "updateNewMessage"
+    assert update.update_id == 11
+    assert update.payload["chat"]["title"] == "Ariel"
+    assert update.payload["users"][0]["id"] == 42
+    assert transport.sent[0]["@type"] == "getAuthorizationState"
+    assert any(message["@type"] == "setTdlibParameters" for message in transport.sent)
+    assert any(message["@type"] == "setAuthenticationPhoneNumber" for message in transport.sent)
+    assert any(message["@type"] == "checkAuthenticationCode" for message in transport.sent)
+    assert any(message["@type"] == "checkAuthenticationPassword" for message in transport.sent)
+
+
+def test_tdlib_client_requires_code_when_tdlib_asks_for_it(tmp_path) -> None:
+    transport = FakeTdlibTransport(
+        [
+            {
+                "@type": "updateAuthorizationState",
+                "authorization_state": {"@type": "authorizationStateWaitCode"},
+            }
+        ]
+    )
+    settings = TdlibAuthSettings(
+        account="personal",
+        api_id=123,
+        api_hash="hash",
+        phone_number="+15551234567",
+        database_directory=tmp_path / "tdlib" / "db",
+        files_directory=tmp_path / "tdlib" / "files",
+        code=None,
+        password=None,
+    )
+    client = TdlibTelegramClient(
+        transport=transport,
+        settings=settings,
+        auth_timeout_seconds=1.0,
+        receive_timeout_seconds=0.01,
+    )
+
+    try:
+        client.get_updates(limit=1)
+    except RuntimeError as exc:
+        assert "authentication code" in str(exc)
+    else:
+        raise AssertionError("Expected missing-code TDLib auth failure")
