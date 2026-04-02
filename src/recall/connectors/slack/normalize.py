@@ -280,4 +280,4 @@ def normalize_slack_day(paths: RecallPaths, *, date: str) -> Path:
         )
 
     write_artifact_metadata(paths, source="slack", date=date, artifacts=artifacts)
-    return write_normalized_events(paths, date, events)
+    return write_normalized_events(paths, date, events, merge_existing=True)

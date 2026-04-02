@@ -40,15 +40,66 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _event_sort_key(record: Mapping[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(record.get("timestamp") or ""),
+        str(record.get("source") or ""),
+        str(record.get("event_id") or ""),
+    )
+
+
+def _merge_normalized_event_records(
+    existing: Iterable[dict[str, Any]],
+    incoming: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    existing_order: list[str] = []
+    existing_index: dict[str, int] = {}
+    incoming_by_id: dict[str, dict[str, Any]] = {}
+    incoming_order: list[str] = []
+
+    for record in existing:
+        event_id = str(record["event_id"])
+        existing_order.append(event_id)
+        existing_index[event_id] = len(merged)
+        merged.append(dict(record))
+
+    for record in incoming:
+        serialized = dict(record)
+        event_id = str(serialized["event_id"])
+        incoming_by_id[event_id] = serialized
+        incoming_order.append(event_id)
+
+    for event_id in existing_order:
+        if event_id in incoming_by_id:
+            merged[existing_index[event_id]] = incoming_by_id[event_id]
+
+    new_records = [
+        incoming_by_id[event_id] for event_id in incoming_order if event_id not in existing_index
+    ]
+    new_records.sort(key=_event_sort_key)
+    merged.extend(new_records)
+
+    return merged
+
+
 def write_normalized_events(
     paths: RecallPaths,
     date: str,
     events: Iterable[NormalizedEvent],
     *,
     append: bool = False,
+    merge_existing: bool = False,
 ) -> Path:
     destination = normalized_events_path(paths.normalized, date)
-    write_jsonl(destination, (event.to_record() for event in events), append=append)
+    event_records = [event.to_record() for event in events]
+
+    if merge_existing and destination.exists():
+        merged_records = _merge_normalized_event_records(read_jsonl(destination), event_records)
+        write_jsonl(destination, merged_records, append=False)
+        return destination
+
+    write_jsonl(destination, event_records, append=append)
     return destination
 
 

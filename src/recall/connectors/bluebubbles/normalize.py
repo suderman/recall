@@ -223,5 +223,5 @@ def normalize_bluebubbles_day(paths: RecallPaths, *, date: str) -> tuple[Path, P
     artifact_path = write_artifact_metadata(
         paths, source="bluebubbles", date=date, artifacts=artifacts
     )
-    event_path = write_normalized_events(paths, date, events)
+    event_path = write_normalized_events(paths, date, events, merge_existing=True)
     return event_path, artifact_path

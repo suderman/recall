@@ -15,6 +15,8 @@ from recall.connectors.bluebubbles.exporter import export_bluebubbles_history
 from recall.connectors.bluebubbles.importer import import_bluebubbles_export
 from recall.connectors.bluebubbles.normalize import normalize_bluebubbles_day
 from recall.connectors.bluebubbles.webhook import create_bluebubbles_webhook_app
+from recall.normalize.events import NormalizedEvent
+from recall.storage.jsonl import read_jsonl, write_normalized_events
 from recall.storage.paths import RecallPaths
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "bluebubbles" / "new_message.json"
@@ -275,6 +277,33 @@ def test_normalize_bluebubbles_day_reads_imported_historical_messages(tmp_path) 
     assert event_record["source_urls"] == ["https://example.com/old-story"]
     assert artifact_record["source_object_id"] == "at_hist_001"
     assert artifact_record["filename"] == "IMG_0999.jpeg"
+
+
+def test_normalize_bluebubbles_day_preserves_existing_other_source_events(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    export_dir = copy_export_fixture(tmp_path)
+    import_bluebubbles_export(paths, export_path=export_dir, account="personal")
+    write_normalized_events(
+        paths,
+        "2026-03-31",
+        [
+            NormalizedEvent(
+                event_id="evt_slack_existing",
+                source="slack",
+                timestamp="2026-03-31T16:00:00Z",
+                date="2026-03-31",
+                kind="message",
+                text="existing slack event",
+            )
+        ],
+    )
+
+    event_path, _ = normalize_bluebubbles_day(paths, date="2026-03-31")
+
+    records = read_jsonl(event_path)
+    assert {record["source"] for record in records} == {"slack", "bluebubbles"}
+    assert any(record["event_id"] == "evt_slack_existing" for record in records)
+    assert any(record["source"] == "bluebubbles" for record in records)
 
 
 def test_export_bluebubbles_history_writes_bundle_from_messages_db(tmp_path) -> None:
