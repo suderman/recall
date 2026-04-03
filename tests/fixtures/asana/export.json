@@ -68,6 +68,48 @@
             "name": "Ariel Example",
             "email": "ariel@example.com"
           }
+        },
+        {
+          "gid": "story-3",
+          "type": "system",
+          "text": "Assigned task to Ariel Example",
+          "field_name": "assignee",
+          "old_value": "",
+          "new_value": "Ariel Example",
+          "created_at": "2026-04-01T09:15:00Z",
+          "created_by": {
+            "gid": "user-1",
+            "name": "Jon Suderman",
+            "email": "jon@example.com"
+          }
+        },
+        {
+          "gid": "story-4",
+          "type": "system",
+          "text": "Set due date to 2026-04-05",
+          "field_name": "due_on",
+          "old_value": "",
+          "new_value": "2026-04-05",
+          "created_at": "2026-04-01T10:00:00Z",
+          "created_by": {
+            "gid": "user-1",
+            "name": "Jon Suderman",
+            "email": "jon@example.com"
+          }
+        },
+        {
+          "gid": "story-5",
+          "type": "system",
+          "text": "Moved task to In Progress",
+          "field_name": "section",
+          "old_value": "Backlog",
+          "new_value": "In Progress",
+          "created_at": "2026-04-01T11:00:00Z",
+          "created_by": {
+            "gid": "user-2",
+            "name": "Ariel Example",
+            "email": "ariel@example.com"
+          }
         }
       ]
     }

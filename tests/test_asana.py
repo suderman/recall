@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+import zipfile
 from pathlib import Path
 
 from recall.connectors.asana.entities import sync_asana_entities
@@ -20,6 +21,14 @@ def _copy_fixture_export(tmp_path: Path) -> Path:
     return export_dir
 
 
+def _zip_fixture_export(tmp_path: Path) -> Path:
+    export_dir = _copy_fixture_export(tmp_path)
+    zip_path = tmp_path / "asana-export.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        archive.write(export_dir / "export.json", arcname="nested/export.json")
+    return zip_path
+
+
 def test_import_asana_export_writes_daily_raw_envelopes(tmp_path) -> None:
     paths = RecallPaths.from_root(tmp_path)
     export_dir = _copy_fixture_export(tmp_path)
@@ -27,14 +36,32 @@ def test_import_asana_export_writes_daily_raw_envelopes(tmp_path) -> None:
     result = import_asana_export(paths, export_path=export_dir, account="work")
 
     assert result.tasks_imported == 1
-    assert result.stories_imported == 2
+    assert result.stories_imported == 5
     assert result.dates_written == ["2026-03-31", "2026-04-01"]
     assert (result.import_dir / "export.json").exists()
 
     march_rows = read_jsonl(paths.raw_capture_dir("asana", "2026-03-31") / "events.jsonl")
     april_rows = read_jsonl(paths.raw_capture_dir("asana", "2026-04-01") / "events.jsonl")
     assert [row["event_type"] for row in march_rows] == ["task", "task_story"]
-    assert [row["event_type"] for row in april_rows] == ["task_completion", "task_story"]
+    assert [row["event_type"] for row in april_rows] == [
+        "task_completion",
+        "task_story",
+        "task_story",
+        "task_story",
+        "task_story",
+    ]
+
+
+def test_import_asana_zip_export_writes_daily_raw_envelopes(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    export_zip = _zip_fixture_export(tmp_path)
+
+    result = import_asana_export(paths, export_path=export_zip, account="work")
+
+    assert result.tasks_imported == 1
+    assert result.stories_imported == 5
+    assert result.dates_written == ["2026-03-31", "2026-04-01"]
+    assert (result.import_dir / "export.json").exists()
 
 
 def test_normalize_asana_day_writes_task_and_story_events(tmp_path) -> None:
@@ -62,6 +89,27 @@ def test_normalize_asana_day_writes_task_and_story_events(tmp_path) -> None:
     assert "comment" in story["tags"]
     assert story["thread_id"] == "task-1"
     assert story["raw_ref"]["locator"]["story_gid"] == "story-1"
+
+
+def test_normalize_asana_day_classifies_due_date_assignment_and_section_changes(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    export_dir = _copy_fixture_export(tmp_path)
+    import_asana_export(paths, export_path=export_dir, account="work")
+
+    normalized_path = normalize_asana_day(paths, date="2026-04-01")
+    records = [record for record in read_jsonl(normalized_path) if record["source"] == "asana"]
+
+    kinds = {record["kind"]: record for record in records}
+    assert "task_completion" in kinds
+    assert "task_status_change" in kinds
+    assert "task_assignment_change" in kinds
+    assert "task_due_date_change" in kinds
+    assert "task_section_change" in kinds
+    assert "status_change" in kinds["task_status_change"]["tags"]
+    assert "assignment_change" in kinds["task_assignment_change"]["tags"]
+    assert "due_date_change" in kinds["task_due_date_change"]["tags"]
+    assert "section_change" in kinds["task_section_change"]["tags"]
+    assert kinds["task_due_date_change"]["raw_fragment"]["field_name"] == "due_on"
 
 
 def test_sync_asana_entities_is_idempotent(tmp_path) -> None:

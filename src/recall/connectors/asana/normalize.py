@@ -70,6 +70,28 @@ def _task_text(task: dict[str, Any]) -> str | None:
     return notes or None
 
 
+def _story_kind_and_tags(story: dict[str, Any]) -> tuple[str, list[str]]:
+    story_type = str(story.get("type") or "story").strip() or "story"
+    field_name = str(story.get("field_name") or "").strip().lower()
+    tags = ["asana", "task_story", story_type]
+    if story_type == "comment":
+        tags.append("comment")
+        return "task_story", tags
+    if field_name in {"assignee", "assigned_to", "responsible_party"}:
+        tags.append("assignment_change")
+        return "task_assignment_change", tags
+    if field_name in {"due_date", "due_on", "due_at"}:
+        tags.append("due_date_change")
+        return "task_due_date_change", tags
+    if field_name in {"section", "memberships.section", "project_section"}:
+        tags.append("section_change")
+        return "task_section_change", tags
+    if field_name in {"completed", "is_completed"}:
+        tags.append("status_change")
+        return "task_status_change", tags
+    return "task_story", tags
+
+
 def normalize_asana_day(paths: RecallPaths, *, date: str) -> Path:
     parse_date(date)
     paths.ensure_directories()
@@ -169,11 +191,9 @@ def normalize_asana_day(paths: RecallPaths, *, date: str) -> Path:
             continue
         task_gid = str(payload.get("task_gid") or f"line-{index}")
         story_gid = str(story.get("gid") or f"story-{index}")
-        story_type = str(story.get("type") or "story").strip() or "story"
         story_text = str(story.get("text") or "").strip() or None
-        tags = ["asana", "task_story", story_type]
-        if story_type == "comment":
-            tags.append("comment")
+        kind, tags = _story_kind_and_tags(story)
+        story_type = str(story.get("type") or "story").strip() or "story"
         events.append(
             NormalizedEvent(
                 event_id=_stable_event_id(account, event_type, story_gid),
@@ -181,7 +201,7 @@ def normalize_asana_day(paths: RecallPaths, *, date: str) -> Path:
                 account=account,
                 timestamp=timestamp,
                 date=date,
-                kind="task_story",
+                kind=kind,
                 conversation_id=task_gid,
                 conversation_label=str(payload.get("task_name") or "").strip() or None,
                 thread_id=task_gid,
@@ -207,6 +227,7 @@ def normalize_asana_day(paths: RecallPaths, *, date: str) -> Path:
                     "task_gid": task_gid,
                     "story_gid": story_gid,
                     "story_type": story_type,
+                    "story_kind": kind,
                     "text": story.get("text"),
                     "field_name": story.get("field_name"),
                     "old_value": story.get("old_value"),
