@@ -19,6 +19,11 @@ from recall.cli.entities import (
 )
 from recall.cli.events import show_events
 from recall.config import resolve_root
+from recall.connectors.asana.cli import (
+    import_asana_export_bundle,
+    normalize_asana,
+    sync_asana_entities,
+)
 from recall.connectors.bluebubbles.cli import (
     export_bluebubbles_history_bundle,
     import_bluebubbles_export_bundle,
@@ -153,6 +158,7 @@ normalize_app.command("bluebubbles")(normalize_bluebubbles)
 normalize_app.command("telegram")(normalize_telegram)
 normalize_app.command("email")(normalize_email)
 normalize_app.command("calendar")(normalize_calendar)
+normalize_app.command("asana")(normalize_asana)
 events_app.command("show")(show_events)
 artifacts_app.command("show")(show_artifacts)
 artifacts_download_app.command("slack")(download_slack_artifact_bytes)
@@ -162,6 +168,7 @@ entities_sync_app.command("slack")(sync_slack_entities)
 entities_sync_app.command("bluebubbles")(sync_bluebubbles_entities)
 entities_sync_app.command("telegram")(sync_telegram_entities)
 entities_sync_app.command("email")(sync_email_entities)
+entities_sync_app.command("asana")(sync_asana_entities)
 entities_show_app.command("people")(show_people)
 entities_show_app.command("identities")(show_identities)
 entities_show_app.command("resolutions")(show_resolutions)
@@ -170,6 +177,7 @@ state_show_app.command("slack")(show_slack_state)
 state_show_app.command("telegram")(show_telegram_state)
 import_app.command("bluebubbles-export")(import_bluebubbles_export_bundle)
 import_app.command("telegram-export")(import_telegram_export_bundle)
+import_app.command("asana-export")(import_asana_export_bundle)
 export_app.command("bluebubbles-history")(export_bluebubbles_history_bundle)
 
 

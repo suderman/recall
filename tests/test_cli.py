@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typer.testing import CliRunner
 
 import recall.cli.artifacts as artifacts_cli
+import recall.connectors.asana.cli as asana_cli
 import recall.connectors.calendar.cli as calendar_cli
 import recall.connectors.email.cli as email_cli
 from recall.cli.main import app
@@ -481,6 +482,21 @@ def test_import_bluebubbles_export_reports_next_steps(tmp_path) -> None:
     assert "recall normalize bluebubbles --date YYYY-MM-DD" in result.stdout
 
 
+def test_import_asana_export_reports_next_steps(tmp_path) -> None:
+    export_dir = tmp_path / "asana-export"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    (export_dir / "export.json").write_text('{"name":"Work Export","tasks":[]}', encoding="utf-8")
+
+    result = runner.invoke(
+        app, ["import", "asana-export", str(export_dir), "--root", str(tmp_path)]
+    )
+
+    assert result.exit_code == 0
+    assert "mode=import" in result.stdout
+    assert "tasks_imported=0" in result.stdout
+    assert "recall normalize asana --date YYYY-MM-DD" in result.stdout
+
+
 def test_entities_sync_slack_persists_identity_rows(tmp_path) -> None:
     paths = _copy_slack_fixture_capture(tmp_path)
 
@@ -514,6 +530,41 @@ def test_entities_sync_email_persists_identity_rows(tmp_path, monkeypatch) -> No
     assert result.exit_code == 0
     assert "identities=3" in result.stdout
     assert "identity_aliases=3" in result.stdout
+
+
+def test_entities_sync_asana_persists_identity_rows(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        asana_cli,
+        "sync_asana_entities_for_date",
+        lambda *args, **kwargs: SimpleNamespace(identities_synced=6, aliases_synced=6),
+    )
+
+    result = runner.invoke(
+        app,
+        ["entities", "sync", "asana", "--root", str(tmp_path), "--date", "2026-03-31"],
+    )
+
+    assert result.exit_code == 0
+    assert "identities=6" in result.stdout
+    assert "identity_aliases=6" in result.stdout
+
+
+def test_normalize_asana_reports_next_steps(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        asana_cli,
+        "normalize_asana_day",
+        lambda *args, **kwargs: RecallPaths.from_root(tmp_path).normalized
+        / "2026"
+        / "2026-03-31.jsonl",
+    )
+
+    result = runner.invoke(
+        app,
+        ["normalize", "asana", "--root", str(tmp_path), "--date", "2026-03-31"],
+    )
+
+    assert result.exit_code == 0
+    assert "recall entities sync asana --date 2026-03-31" in result.stdout
 
 
 def test_normalize_telegram_reports_next_steps(tmp_path) -> None:

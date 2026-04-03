@@ -172,7 +172,7 @@ Keep this section current as implementation advances.
 
 - [x] Email/notmuch normalization and entity extraction
 - [x] Calendar/khal normalization
-- [ ] Asana import and normalization
+- [x] Asana import and normalization
 - [x] Timestamp-aware resolution application in normalization/enrichment using `valid_from` and `valid_to`
 - [ ] Suggested-match review workflow for ambiguous cross-source identities
 - [ ] CLI to inspect unresolved identities and proposed matches
