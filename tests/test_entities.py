@@ -8,6 +8,7 @@ from recall.connectors.email.entities import sync_email_entities
 from recall.connectors.slack.entities import sync_slack_entities
 from recall.connectors.telegram.entities import sync_telegram_entities
 from recall.entities.enrich import enrich_events_with_people
+from recall.entities.query import list_unresolved_identities
 from recall.entities.resolve import match_entities
 from recall.entities.storage import upsert_identities, upsert_persons, upsert_resolutions
 from recall.normalize.events import NormalizedEvent
@@ -327,6 +328,164 @@ valid_from = "2026-04-01"
         ("person_old_owner", None, "2026-03-31"),
     ]
     assert identity == (None,)
+
+
+def test_list_unresolved_identities_includes_ambiguous_suggested_matches(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    upsert_persons(
+        paths,
+        [
+            {
+                "person_id": "person_one",
+                "display_name": "Ariel One",
+                "sort_name": None,
+                "notes": "",
+                "tags": [],
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+            {
+                "person_id": "person_two",
+                "display_name": "Ariel Two",
+                "sort_name": None,
+                "notes": "",
+                "tags": [],
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+        ],
+    )
+    upsert_identities(
+        paths,
+        [
+            {
+                "identity_id": "ident_slack_shared",
+                "person_id": "person_one",
+                "source": "slack",
+                "kind": "email",
+                "value": "shared@example.com",
+                "label": "Slack profile email",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+            {
+                "identity_id": "ident_asana_shared",
+                "person_id": "person_two",
+                "source": "asana",
+                "kind": "email",
+                "value": "shared@example.com",
+                "label": "Asana email",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+            {
+                "identity_id": "ident_email_shared_example_com",
+                "person_id": None,
+                "source": "email",
+                "kind": "email",
+                "value": "shared@example.com",
+                "label": "Email address",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+            {
+                "identity_id": "ident_orphan_handle",
+                "person_id": None,
+                "source": "telegram",
+                "kind": "handle",
+                "value": "orphan-handle",
+                "label": "Telegram handle",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+        ],
+    )
+
+    rows = list_unresolved_identities(paths)
+
+    assert [row.identity_id for row in rows] == [
+        "ident_email_shared_example_com",
+        "ident_orphan_handle",
+    ]
+    suggested = rows[0].suggested_matches
+    assert [match.person_id for match in suggested] == ["person_one", "person_two"]
+    assert all(match.confidence == "low" for match in suggested)
+    assert rows[1].suggested_matches == []
+
+
+def test_list_unresolved_identities_suggested_only_filters_empty_candidates(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    upsert_persons(
+        paths,
+        [
+            {
+                "person_id": "person_one",
+                "display_name": "Ariel One",
+                "sort_name": None,
+                "notes": "",
+                "tags": [],
+                "created_at": "2026-03-31T00:00:00Z",
+            }
+        ],
+    )
+    upsert_identities(
+        paths,
+        [
+            {
+                "identity_id": "ident_slack_shared",
+                "person_id": "person_one",
+                "source": "slack",
+                "kind": "email",
+                "value": "shared@example.com",
+                "label": "Slack profile email",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+            {
+                "identity_id": "ident_email_shared_example_com",
+                "person_id": None,
+                "source": "email",
+                "kind": "email",
+                "value": "shared@example.com",
+                "label": "Email address",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+            {
+                "identity_id": "ident_orphan_handle",
+                "person_id": None,
+                "source": "telegram",
+                "kind": "handle",
+                "value": "orphan-handle",
+                "label": "Telegram handle",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+        ],
+    )
+
+    rows = list_unresolved_identities(paths, suggested_only=True)
+
+    assert [row.identity_id for row in rows] == ["ident_email_shared_example_com"]
 
 
 def test_enrich_events_with_people_uses_event_timestamp_against_resolution_windows(

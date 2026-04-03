@@ -174,8 +174,8 @@ Keep this section current as implementation advances.
 - [x] Calendar/khal normalization
 - [x] Asana import and normalization
 - [x] Timestamp-aware resolution application in normalization/enrichment using `valid_from` and `valid_to`
-- [ ] Suggested-match review workflow for ambiguous cross-source identities
-- [ ] CLI to inspect unresolved identities and proposed matches
+- [x] Suggested-match review workflow for ambiguous cross-source identities
+- [x] CLI to inspect unresolved identities and proposed matches
 - [ ] Broader Telegram validation with real-world forwards, service messages, channels, and large media/documents
 - [ ] Telegram artifact coverage validation for real animation/video-note/sticker downloads
 - [ ] Date-range rebuild and backfill orchestration commands across connectors

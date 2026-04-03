@@ -13,7 +13,7 @@ import recall.connectors.calendar.cli as calendar_cli
 import recall.connectors.email.cli as email_cli
 from recall.cli.main import app
 from recall.connectors.telegram.entities import sync_telegram_entities
-from recall.entities.storage import upsert_identities
+from recall.entities.storage import upsert_identities, upsert_persons
 from recall.normalize.artifacts import NormalizedArtifact, RemoteLocator
 from recall.normalize.events import NormalizedEvent, RawReference
 from recall.storage.jsonl import write_artifact_metadata, write_normalized_events
@@ -547,6 +547,82 @@ def test_entities_sync_asana_persists_identity_rows(tmp_path, monkeypatch) -> No
     assert result.exit_code == 0
     assert "identities=6" in result.stdout
     assert "identity_aliases=6" in result.stdout
+
+
+def test_entities_show_unresolved_reports_suggested_matches(tmp_path) -> None:
+    upsert_persons(
+        RecallPaths.from_root(tmp_path),
+        [
+            {
+                "person_id": "person_one",
+                "display_name": "Ariel One",
+                "sort_name": None,
+                "notes": "",
+                "tags": [],
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+            {
+                "person_id": "person_two",
+                "display_name": "Ariel Two",
+                "sort_name": None,
+                "notes": "",
+                "tags": [],
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+        ],
+    )
+    upsert_identities(
+        RecallPaths.from_root(tmp_path),
+        [
+            {
+                "identity_id": "ident_slack_shared",
+                "person_id": "person_one",
+                "source": "slack",
+                "kind": "email",
+                "value": "shared@example.com",
+                "label": "Slack profile email",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+            {
+                "identity_id": "ident_asana_shared",
+                "person_id": "person_two",
+                "source": "asana",
+                "kind": "email",
+                "value": "shared@example.com",
+                "label": "Asana email",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+            {
+                "identity_id": "ident_email_shared_example_com",
+                "person_id": None,
+                "source": "email",
+                "kind": "email",
+                "value": "shared@example.com",
+                "label": "Email address",
+                "is_primary": False,
+                "status": "active",
+                "valid_from": None,
+                "valid_to": None,
+                "created_at": "2026-03-31T00:00:00Z",
+            },
+        ],
+    )
+
+    result = runner.invoke(app, ["entities", "show", "unresolved", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "count=1" in result.stdout
+    assert "ident_email_shared_example_com email:email value=shared@example.com" in result.stdout
+    assert "suggested=person_one Ariel One confidence=low" in result.stdout
+    assert "suggested=person_two Ariel Two confidence=low" in result.stdout
 
 
 def test_normalize_asana_reports_next_steps(tmp_path, monkeypatch) -> None:

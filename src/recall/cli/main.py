@@ -16,6 +16,7 @@ from recall.cli.entities import (
     show_identities,
     show_people,
     show_resolutions,
+    show_unresolved_identities,
 )
 from recall.cli.events import show_events
 from recall.config import resolve_root
@@ -28,7 +29,9 @@ from recall.connectors.bluebubbles.cli import (
     export_bluebubbles_history_bundle,
     import_bluebubbles_export_bundle,
     normalize_bluebubbles,
+    recover_bluebubbles,
     serve_bluebubbles,
+    show_bluebubbles_state,
     sync_bluebubbles_entities,
 )
 from recall.connectors.calendar.cli import normalize_calendar
@@ -147,6 +150,7 @@ def version() -> None:
 
 capture_app.command("slack")(capture_slack)
 bluebubbles_capture_app.command("serve")(serve_bluebubbles)
+bluebubbles_capture_app.command("recover")(recover_bluebubbles)
 telegram_capture_app.command("append")(append_telegram)
 telegram_capture_app.command("once")(capture_telegram_once)
 telegram_capture_app.command("run")(run_telegram_capture)
@@ -172,8 +176,10 @@ entities_sync_app.command("asana")(sync_asana_entities)
 entities_show_app.command("people")(show_people)
 entities_show_app.command("identities")(show_identities)
 entities_show_app.command("resolutions")(show_resolutions)
+entities_show_app.command("unresolved")(show_unresolved_identities)
 entities_app.command("match")(run_entity_matching)
 state_show_app.command("slack")(show_slack_state)
+state_show_app.command("bluebubbles")(show_bluebubbles_state)
 state_show_app.command("telegram")(show_telegram_state)
 import_app.command("bluebubbles-export")(import_bluebubbles_export_bundle)
 import_app.command("telegram-export")(import_telegram_export_bundle)

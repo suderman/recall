@@ -10,6 +10,7 @@ from recall.entities.query import (
     list_people,
     list_person_aliases,
     list_resolutions,
+    list_unresolved_identities,
 )
 from recall.entities.resolve import match_entities
 from recall.storage.paths import RecallPaths
@@ -93,6 +94,43 @@ def show_resolutions(
             typer.echo(f"  valid_from={row.valid_from or '-'} valid_to={row.valid_to or '-'}")
         if row.evidence:
             typer.echo(f"  evidence={'; '.join(row.evidence)}")
+
+
+def show_unresolved_identities(
+    suggested_only: bool = typer.Option(
+        False,
+        "--suggested-only",
+        help="Only show unresolved identities with candidate person matches.",
+    ),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+) -> None:
+    """Show unresolved identities and any proposed person matches."""
+
+    paths = _paths_for(root)
+    rows = list_unresolved_identities(paths, suggested_only=suggested_only)
+    typer.echo(f"count={len(rows)}")
+    for row in rows:
+        typer.echo(f"- {row.identity_id} {row.source}:{row.kind} value={row.value}")
+        if row.aliases:
+            formatted_aliases = ", ".join(f"{value} ({source})" for value, source in row.aliases)
+            typer.echo(f"  aliases={formatted_aliases}")
+        if not row.suggested_matches:
+            typer.echo("  suggested_matches=-")
+            continue
+        for suggestion in row.suggested_matches:
+            typer.echo(
+                f"  suggested={suggestion.person_id} {suggestion.display_name} "
+                f"confidence={suggestion.confidence}"
+            )
+            if suggestion.evidence:
+                typer.echo(f"  evidence={'; '.join(suggestion.evidence)}")
 
 
 def run_entity_matching(
