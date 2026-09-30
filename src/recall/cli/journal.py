@@ -1,0 +1,56 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from zoneinfo import ZoneInfoNotFoundError
+
+import typer
+
+from recall.config import resolve_root
+from recall.storage.paths import RecallPaths
+from recall.synthesize.journal import prepare_journal, save_journal
+
+
+def prepare(
+    day: str = typer.Option(..., "--date"),
+    author: str = typer.Option(..., "--author"),
+    timezone_name: str = typer.Option("UTC", "--timezone"),
+    root: Path | None = typer.Option(None, "--root"),
+) -> None:
+    """Snapshot evidence and instructions locally. Does not call an LLM."""
+    try:
+        result = prepare_journal(
+            RecallPaths.from_root(resolve_root(root)),
+            day=day,
+            author=author,
+            timezone_name=timezone_name,
+        )
+    except (ValueError, OSError, ZoneInfoNotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(result)
+
+
+def save(
+    packet: Path = typer.Option(..., "--packet", exists=True, file_okay=False),
+    draft: Path = typer.Option(..., "--draft", exists=True, dir_okay=False),
+    model: str = typer.Option(..., "--model"),
+    options: str = typer.Option("{}", "--options", help="Generation options as a JSON object."),
+    root: Path | None = typer.Option(None, "--root"),
+) -> None:
+    """Save an externally drafted journal as a cited revision. No existing view is replaced."""
+    try:
+        generation_options = json.loads(options)
+        if not isinstance(generation_options, dict):
+            raise ValueError("Generation options must be a JSON object")
+        result = save_journal(
+            RecallPaths.from_root(resolve_root(root)),
+            packet_dir=packet,
+            body=draft.read_text(encoding="utf-8"),
+            model=model,
+            generation_options=generation_options,
+        )
+    except (ValueError, OSError, ZoneInfoNotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(result)
