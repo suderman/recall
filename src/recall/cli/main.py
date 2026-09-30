@@ -20,6 +20,7 @@ from recall.cli.entities import (
 )
 from recall.cli.events import show_events
 from recall.cli.rebuild import rebuild
+from recall.cli.timeline import build_timeline
 from recall.config import resolve_root
 from recall.connectors.asana.cli import (
     import_asana_export_bundle,
@@ -62,6 +63,7 @@ app = typer.Typer(help="Recall command-line interface.", no_args_is_help=True)
 capture_app = typer.Typer(help="Capture raw evidence from source systems.")
 normalize_app = typer.Typer(help="Normalize captured evidence into daily events.")
 events_app = typer.Typer(help="Inspect normalized events.")
+timeline_app = typer.Typer(help="Build deterministic Org evidence timelines.")
 artifacts_app = typer.Typer(help="Inspect normalized artifact metadata.")
 artifacts_download_app = typer.Typer(help="Download source-native artifact bytes.")
 entities_app = typer.Typer(help="Manage identity and entity storage.")
@@ -77,6 +79,7 @@ export_app = typer.Typer(help="Export source-native history bundles.")
 app.add_typer(capture_app, name="capture")
 app.add_typer(normalize_app, name="normalize")
 app.add_typer(events_app, name="events")
+app.add_typer(timeline_app, name="timeline")
 app.add_typer(artifacts_app, name="artifacts")
 app.add_typer(entities_app, name="entities")
 app.add_typer(state_app, name="state")
@@ -165,6 +168,7 @@ normalize_app.command("email")(normalize_email)
 normalize_app.command("calendar")(normalize_calendar)
 normalize_app.command("asana")(normalize_asana)
 app.command("rebuild")(rebuild)
+timeline_app.command("build")(build_timeline)
 events_app.command("show")(show_events)
 artifacts_app.command("show")(show_artifacts)
 artifacts_download_app.command("slack")(download_slack_artifact_bytes)

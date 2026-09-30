@@ -32,6 +32,12 @@ def write_jsonl(
         with path.open("a", encoding="utf-8") as handle:
             handle.write(content)
         return
+    write_text_atomic(path, content)
+
+
+def write_text_atomic(path: Path, content: str) -> None:
+    """Replace one generated file without exposing a partial write."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
     try:
         with NamedTemporaryFile(

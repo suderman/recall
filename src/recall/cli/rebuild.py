@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from zoneinfo import ZoneInfoNotFoundError
 
 import typer
 
@@ -24,7 +25,7 @@ def rebuild(
             RecallPaths.from_root(resolve_root(root)), RecallPaths.from_root(output_root),
             first=first, last=last, sources=source, timezone_name=timezone_name, account=account,
         )
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, ZoneInfoNotFoundError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     for job in jobs:
