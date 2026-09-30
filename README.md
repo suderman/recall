@@ -8,7 +8,7 @@ day, build journals and worklogs, and keep continuity over time.
 
 > capture first, interpret later.
 
-Recall isn't just a fancy journal app. It's:
+The longer-term outputs are:
 
 - daily journal entries
 - worklogs and timesheets
@@ -91,37 +91,27 @@ Outputs built from normalized events.
 
 ## Repository layout
 
-Starting point, not a prison:
-
-```
-recall/
-  README.md
-  AGENTS.md
-  connectors/
-    slack/
-    telegram/
-    bluebubbles/
-    email/
-    calendar/
-  imports/
-  raw/
-    slack/
-    telegram/
-    bluebubbles/
-    imports/
-  normalized/
-    2026/
-      2026-03-31.jsonl
-      2026-04-01.jsonl
-  derived/
-    journal/
-      daily/
-      weekly/
-      monthly/
-    worklog/
-  scripts/
-  docs/
-  schemas/
+```text
+src/recall/
+  cli/
+  connectors/     # Slack, Telegram, BlueBubbles, email, calendar, Asana
+  entities/
+  normalize/
+  storage/
+  synthesize/
+config/
+  sources/
+  entity-resolution/
+data/
+  raw/<source>/<capture-date>/
+  normalized/<year>/<event-date>.jsonl
+  artifacts/metadata/<source>/<year>/<date>.jsonl
+  artifacts/blobs/
+  derived/timelines/<year>/<date>.org
+  state/recall.sqlite3
+  state/rebuild/
+tests/
+examples/
 ```
 
 ## Normalized event store
@@ -137,6 +127,7 @@ Everything transforms toward a shared event model:
 
 ```json
 {
+  "event_id": "evt_example",
   "source": "slack",
   "account": "jon-work",
   "timestamp": "2026-03-31T17:31:07Z",
@@ -144,13 +135,21 @@ Everything transforms toward a shared event model:
   "kind": "message",
   "conversation_id": "C024FEKMZ",
   "conversation_label": "#webteam",
-  "sender": "Jon",
-  "participants": [],
+  "sender_identity_id": "ident_slack_user_example",
+  "sender_person_id": null,
+  "participant_identity_ids": [],
+  "participant_person_ids": [],
   "text": "Downloadable Vimeo: ...",
-  "thread_id": "1774987867.000000",
+  "thread_id": "1774978267.000000",
   "tags": [],
-  "raw_ref": "raw/slack/2026-03-31.json",
-  "raw": {}
+  "artifact_ids": [],
+  "source_urls": [],
+  "raw_ref": {
+    "source": "slack",
+    "path": "data/raw/slack/2026-03-31/messages.jsonl",
+    "locator": {"channel": "C024FEKMZ", "ts": "1774978267.000000"}
+  },
+  "raw_fragment": {}
 }
 ```
 
@@ -208,7 +207,7 @@ parsing, rebuilding events for years I've already lived through.
 
 Ideally a connector does both, even if backfill comes later.
 
-## Initial planned sources
+## Implemented sources
 
 ### Slack
 
@@ -216,24 +215,23 @@ Nightly batch capture using the Slack API and my user token.
 
 ### Telegram
 
-Likely always-on capture using TDLib as my real Telegram client.
+TDLib capture and daemon operation, plus Telegram Desktop export import.
 
 ### BlueBubbles
 
-Always-on webhook-based capture.
+Webhook capture, bounded REST recovery after outages, and historical export import.
 
 ### Email
 
-notmuch directly during synthesis — no extra raw layer needed since it's already
-local.
+notmuch queries during normalization. The authoritative Maildir stays local.
 
 ### Calendar
 
-khal / local calendar data directly during synthesis. Same deal.
+khal queries during normalization, with explicit local-day timezone selection.
 
 ### Asana
 
-Import or query structured task data as needed.
+JSON export import and task-event normalization. Direct API capture is not implemented.
 
 ## Workflow
 
@@ -262,11 +260,11 @@ Recall isn't:
 
 ## Near-term goals
 
-- establish repo structure
-- define normalized event schema
-- get Slack daily capture working first
-- add journal synthesis over Slack + email + calendar
-- design backfill/import conventions before the project sprawls
+- review real daily evidence timelines in Emacs
+- validate Telegram edge cases and artifact downloads
+- add bounded remote backfill using the existing local replay contract
+- assess conservative overlap deduplication without losing provenance
+- add narrative journals and worklog filtering only after evidence views are useful
 
 ## Development
 
@@ -458,10 +456,63 @@ recall state show slack
 recall events show --date 2026-03-31
 ```
 
-Run the test suite:
+## Rebuild a week and read it in Emacs
+
+Rebuild from saved captures and selected local queries into a separate workspace:
 
 ```bash
-nix develop -c pytest
+nix develop -c recall rebuild \
+  --root "$PWD" --output-root "$HOME/recall-week" \
+  --from 2026-03-27 --to 2026-04-02 --timezone America/Edmonton \
+  --source bluebubbles --source slack --source telegram --source asana \
+  --source email --source calendar
+
+nix develop -c recall timeline build \
+  --root "$HOME/recall-week" \
+  --from 2026-03-27 --to 2026-04-02 --timezone America/Edmonton
+```
+
+Open `~/recall-week/data/derived/timelines/2026/2026-03-31.org` in Emacs.
+These are evidence timelines, not narrative journals or timesheets. They retain
+source text, event IDs, identity IDs, raw locators, and links to available local
+files. Calendar entries do not establish attendance. Missing input does not
+establish that nothing happened.
+
+Input and output roots must not overlap. The rebuild command does not pull
+remote history, alter raw captures, reset cursors, or replace the input archive.
+It scans every saved capture date for selected sources so late arrivals land on
+their event day. The first run may process history outside the requested week.
+Malformed input fails that source rather than silently publishing a partial
+rebuild. Source-native attachment downloads are a separate operation.
+
+Successful replacement is scoped to a source and account. Without `--account`,
+all accounts for the selected source are in scope. Other sources stay intact.
+Email and calendar queries use account `default`. `--account` filters source
+account labels; it does not rename them.
+Missing, unsupported, and failed inputs preserve the previous contribution;
+successful rebuilds replace their scoped contribution. Empty removal requires
+a successful local query or a proven empty capture.
+Statuses describe saved/query evidence, not complete capture coverage.
+
+`data/state/rebuild/manifest.jsonl` records each source/day result, options,
+input hashes, entity/configuration hashes, code hash, and query snapshot hash.
+Raw inputs resume from hash-checked caches; email and calendar are queried again.
+Rerun the same command after interruption. Keep raw evidence and checkpoint
+files. Rewritten files are atomic, but the range is not one database transaction.
+A single-writer lock prevents concurrent rebuilds in the same output workspace.
+
+Timeline display timezone must match rebuild coverage. Rendering refuses to
+run during a rebuild or overwrite edited/unowned timeline files. Keep handwritten
+notes elsewhere. Imported text is fixed-width quoted text; Org blocks and Emacs
+file-local variables are escaped. No model service is used for synthesis.
+
+For checkout-source verification, rather than the packaged CLI:
+
+```bash
+nix develop -c env PYTHONPATH="$PWD/src" python -m recall.cli.main --help
+nix develop -c pytest -q
+nix develop -c ruff check src tests
+nix build --no-link
 ```
 
 ## Long-term goals
@@ -485,13 +536,17 @@ nix develop -c pytest
 
 ## Related docs
 
-- AGENTS.md — working rules, architecture constraints, connector expectations
-  live here.
-- Connector-specific setup notes — docs/ or inside each connector directory.
+- [AGENTS.md](AGENTS.md) records working rules and archive constraints.
+- [SPEC.md](SPEC.md) describes event, artifact, and connector contracts.
+- `config/sources/*.toml.example` and `examples/systemd/` have setup examples.
 
 ## Status
 
-This is the very beginning.
+Recall has six normalization paths, local raw capture/import, SQLite identity
+resolution, source-native artifacts, isolated date-range replay, and deterministic
+Org evidence timelines. Replay tests cover exact duplicate IDs, scoped stale
+removal, download-state preservation, write failures, late arrivals, and local-day
+boundaries including DST.
 
-First working piece is Slack daily capture. The bigger goal is a real second
-brain built from the evidence of a life.
+Remote range backfill, broad Telegram validation, fuzzy overlap matching,
+narrative journals, worklogs, and search indexes remain unfinished.

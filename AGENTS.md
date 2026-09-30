@@ -179,9 +179,11 @@ Keep this section current as implementation advances.
 - [x] CLI to inspect unresolved identities and proposed matches
 - [ ] Broader Telegram validation with real-world forwards, service messages, channels, and large media/documents
 - [ ] Telegram artifact coverage validation for real animation/video-note/sticker downloads
-- [ ] Date-range rebuild and backfill orchestration commands across connectors
+- [x] Isolated local date-range rebuild with scoped replacement, coverage, and resume checkpoints
+- [ ] Remote date-range capture and backfill orchestration across connectors
 - [ ] Deduplication logic across overlapping sources and imports
-- [ ] Derived journal/worklog/timeline synthesis on top of normalized events and entities
+- [x] Deterministic cited daily Org evidence timelines with annotation protection
+- [ ] Narrative journals, worklogs, and other derived views
 
 ---
 
