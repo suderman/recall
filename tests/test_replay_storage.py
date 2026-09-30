@@ -72,7 +72,8 @@ def test_failed_rewrite_preserves_bytes_and_cleans_temporary_file(tmp_path, monk
     assert list(tmp_path.iterdir()) == [path]
 
 
-def test_artifact_replay_preserves_download_state_and_other_accounts(tmp_path):
+@pytest.mark.parametrize("observed_status", ["not_requested", "imported", "downloaded"])
+def test_artifact_replay_preserves_download_state_and_other_accounts(tmp_path, observed_status):
     paths = RecallPaths.from_root(tmp_path)
     downloaded = NormalizedArtifact(
         artifact_id="a",
@@ -89,14 +90,29 @@ def test_artifact_replay_preserves_download_state_and_other_accounts(tmp_path):
     path = jsonl.write_artifact_metadata(
         paths, source="slack", date="2026-03-31", artifacts=[downloaded, other]
     )
-    fresh = NormalizedArtifact(artifact_id="a", source="slack", kind="file", account="work")
+    fresh = NormalizedArtifact(
+        artifact_id="a", source="slack", kind="file", account="work",
+        event_ids=["new"], download_status=observed_status,
+        local_path="raw-copy" if observed_status != "not_requested" else None,
+    )
     jsonl.write_artifact_metadata(
         paths, source="slack", date="2026-03-31", artifacts=[fresh, fresh]
     )
     rows = {row["artifact_id"]: row for row in jsonl.read_jsonl(path)}
     assert set(rows) == {"a", "b"}
+    assert rows["a"]["event_ids"] == ["new"]
     for field in ("local_path", "checksums", "size_bytes", "download_status", "last_error"):
         assert rows["a"][field] == downloaded.to_record()[field]
+
+
+def test_shared_imported_artifacts_union_event_links(tmp_path):
+    paths = RecallPaths.from_root(tmp_path)
+    artifact = NormalizedArtifact(artifact_id="shared", source="bluebubbles", kind="image",
+                                  download_status="imported", local_path="image.jpg",
+                                  event_ids=["one"])
+    path = jsonl.write_artifact_metadata(paths, source="bluebubbles", date="2026-03-31",
+                                        artifacts=[artifact, replace(artifact, event_ids=["two"])])
+    assert jsonl.read_jsonl(path)[0]["event_ids"] == ["one", "two"]
 
 
 def test_event_order_uses_instants_not_offset_strings(tmp_path):

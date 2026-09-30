@@ -133,11 +133,14 @@ def write_artifact_metadata(
     for artifact in artifacts:
         row = artifact.to_record()
         previous = by_id.get(artifact.artifact_id)
-        if previous and row["download_status"] == "not_requested":
+        # Normalizers observe artifacts; they must not replace already acquired bytes.
+        if previous and (row["download_status"] == "not_requested"
+                         or previous["download_status"] in {"downloaded", "imported"}):
             for field in ("local_path", "checksums", "download_status", "last_error"):
                 row[field] = previous[field]
             if row["size_bytes"] is None:
                 row["size_bytes"] = previous.get("size_bytes")
+        if previous:
             row["event_ids"] = sorted(set(previous["event_ids"]) | set(row["event_ids"]))
         by_id[artifact.artifact_id] = row
     write_jsonl(destination, by_id.values(), append=append)
