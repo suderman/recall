@@ -1102,7 +1102,7 @@ def test_tdlib_client_download_remote_file_tries_unknown_then_typed(tmp_path) ->
 def test_tdlib_json_transport_sets_global_log_verbosity_before_client_create(monkeypatch) -> None:
     import recall.connectors.telegram.tdlib as tdlib_module
 
-    calls: list[tuple[str, object]] = []
+    calls: list[tuple[str, tuple]] = []
 
     class FakeFunction:
         def __init__(self, name: str, return_value=None):
