@@ -212,7 +212,11 @@ def save_journal(
             citation_groups.append(group)
         return f"[fn:{citation_groups.index(group) + 1}]"
 
-    prose = re.sub(r"(?:\[fn:[A-Za-z0-9_-]+\])+", numbered_citation, body.strip())
+    prose = re.sub(
+        r"\[fn:[A-Za-z0-9_-]+\](?:[ \t]*\[fn:[A-Za-z0-9_-]+\])*",
+        numbered_citation,
+        body.strip(),
+    )
     day = packet["date"]
     calendar_day = date.fromisoformat(day)
     title = f"{calendar_day:%A, %B} {calendar_day.day}, {calendar_day.year}"

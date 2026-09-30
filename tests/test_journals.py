@@ -59,7 +59,7 @@ def test_packet_stable_complete_and_revisions_separate(tmp_path: Path) -> None:
     assert json.loads((packet / "packet.json").read_text())["coverage"][0]["event_count"] == 0
     body = (
         "** Work\nI prepared the update.[fn:evt_mail][fn:evt_break]\n"
-        "That same evidence supports this sentence.[fn:evt_mail][fn:evt_break]\n"
+        "That same evidence supports this sentence.[fn:evt_mail] [fn:evt_break]\n"
     )
     result = save_journal(paths, packet_dir=packet, body=body, model="test-model")
     saved = result.read_bytes()
