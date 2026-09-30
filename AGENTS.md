@@ -118,9 +118,9 @@ These are current known sources and how they should fit.
 ### BlueBubbles
 
 - shape: webhook / event source
-- mode: **always-on webhook receiver**
-- reason: event-driven ingestion is the natural fit
-- output: append-only raw events and normalized events
+- mode: **always-on webhook receiver** with bounded REST recovery for short outages
+- reason: event-driven ingestion is the natural fit, but short Recall downtime should be recoverable without manual export steps
+- output: append-only raw events plus restart-friendly recovery pulls and normalized events
 
 ### Email via notmuch
 
@@ -158,6 +158,7 @@ Keep this section current as implementation advances.
 
 - [x] Slack daily capture CLI with raw storage, normalization, artifact metadata, and artifact byte download support
 - [x] BlueBubbles webhook capture, normalization, historical export import, and artifact byte download support
+- [x] BlueBubbles short-outage recovery via REST message pull, cursor state, and CLI/state inspection
 - [x] Telegram TDLib capture with append, once, run, and daemon commands
 - [x] Telegram Desktop export import/backfill for extracted directories and zip bundles
 - [x] Telegram normalization for text, photos, documents, voice notes, video, animation, audio, stickers, and video notes

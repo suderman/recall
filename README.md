@@ -307,6 +307,9 @@ Configure BlueBubbles capture by copying `config/sources/bluebubbles.toml.exampl
 to `config/sources/bluebubbles.toml`, then point the BlueBubbles server at the
 Recall webhook URL on your LAN. Use the Recall host's reachable LAN IP, not
 `0.0.0.0`, for example `http://10.1.0.6:8042/bluebubbles/webhook?token=...`.
+If `server_url` and the configured password environment variable are set,
+Recall now attempts a bounded short-gap recovery on startup before the webhook
+receiver begins serving.
 
 Configure Telegram TDLib capture by copying `config/sources/telegram.toml.example`
 to `config/sources/telegram.toml`, then export the configured environment
@@ -446,9 +449,11 @@ recall artifacts download slack --date 2026-03-31
 recall capture bluebubbles serve
 recall artifacts download bluebubbles --date 2026-03-31 --dry-run
 recall artifacts download bluebubbles --date 2026-03-31
+recall capture bluebubbles recover
 recall import bluebubbles-export /path/to/bluebubbles-export
 recall normalize bluebubbles --date 2026-03-31
 recall entities sync bluebubbles --date 2026-03-31
+recall state show bluebubbles
 recall state show slack
 recall events show --date 2026-03-31
 ```

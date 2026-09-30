@@ -1,20 +1,31 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import typer
 import uvicorn
 
 from recall.config import resolve_root
-from recall.connectors.bluebubbles.config import bluebubbles_config_path, load_bluebubbles_config
+from recall.connectors.bluebubbles.config import (
+    BlueBubblesSourceConfig,
+    bluebubbles_config_path,
+    load_bluebubbles_config,
+)
 from recall.connectors.bluebubbles.entities import (
     sync_bluebubbles_entities as sync_bluebubbles_entities_for_date,
 )
 from recall.connectors.bluebubbles.exporter import export_bluebubbles_history
 from recall.connectors.bluebubbles.importer import import_bluebubbles_export
 from recall.connectors.bluebubbles.normalize import normalize_bluebubbles_day
+from recall.connectors.bluebubbles.recovery import (
+    DEFAULT_RECOVERY_HOURS,
+    DEFAULT_RECOVERY_PAGE_SIZE,
+    recover_bluebubbles_messages,
+)
 from recall.connectors.bluebubbles.webhook import create_bluebubbles_webhook_app
 from recall.storage.paths import RecallPaths
+from recall.storage.state import list_connector_cursors
 
 
 def _paths_for(root: Path | None) -> RecallPaths:
@@ -22,6 +33,23 @@ def _paths_for(root: Path | None) -> RecallPaths:
 
 
 def serve_bluebubbles(
+    skip_recovery: bool = typer.Option(
+        False,
+        "--skip-recovery",
+        help="Skip startup recovery of recently missed BlueBubbles messages.",
+    ),
+    recover_hours: int = typer.Option(
+        DEFAULT_RECOVERY_HOURS,
+        "--recover-hours",
+        min=1,
+        help="Maximum lookback window for startup BlueBubbles recovery.",
+    ),
+    recovery_page_size: int = typer.Option(
+        DEFAULT_RECOVERY_PAGE_SIZE,
+        "--recovery-page-size",
+        min=1,
+        help="How many BlueBubbles messages to fetch per recovery page.",
+    ),
     root: Path | None = typer.Option(
         None,
         "--root",
@@ -36,6 +64,16 @@ def serve_bluebubbles(
     paths = _paths_for(root)
     paths.ensure_directories()
     config = load_bluebubbles_config(paths)
+    if skip_recovery:
+        typer.echo("recovery_status=skipped")
+        typer.echo("recovery_reason=disabled_by_flag")
+    else:
+        _run_startup_recovery(
+            paths,
+            recover_hours=recover_hours,
+            recovery_page_size=recovery_page_size,
+            config=config,
+        )
     app = create_bluebubbles_webhook_app(paths, config)
     token_hint = f"?token={config.webhook_token}" if config.webhook_token else ""
     typer.echo("mode=webhook")
@@ -47,6 +85,127 @@ def serve_bluebubbles(
     )
     typer.echo(f"config={bluebubbles_config_path(paths)}")
     uvicorn.run(app, host=config.webhook_bind_host, port=config.webhook_port)
+
+
+def _run_startup_recovery(
+    paths: RecallPaths,
+    *,
+    recover_hours: int,
+    recovery_page_size: int,
+    config: BlueBubblesSourceConfig,
+) -> None:
+    if not config.server_url:
+        typer.echo("recovery_status=skipped")
+        typer.echo("recovery_reason=missing_server_url")
+        return
+
+    password = os.getenv(config.password_env_var)
+    if not password:
+        typer.echo("recovery_status=skipped")
+        typer.echo(f"recovery_reason=missing_env:{config.password_env_var}")
+        return
+
+    try:
+        result = recover_bluebubbles_messages(
+            paths,
+            account=config.account,
+            server_url=config.server_url,
+            password=password,
+            recover_hours=recover_hours,
+            page_size=recovery_page_size,
+        )
+    except Exception as exc:
+        typer.echo("recovery_status=failed")
+        typer.echo(f"recovery_error={exc}")
+        return
+
+    typer.echo("recovery_status=ok")
+    typer.echo(f"recovery_window_start={result.window_start}")
+    typer.echo(f"recovery_window_end={result.window_end}")
+    typer.echo(f"recovered_messages={result.recovered_messages}")
+    typer.echo(f"recovery_skipped_existing={result.skipped_existing}")
+    typer.echo(
+        "recovery_dates_written="
+        + (",".join(result.dates_written) if result.dates_written else "-")
+    )
+    typer.echo(f"recovery_cursor_before={result.cursor_before or '-'}")
+    typer.echo(f"recovery_cursor_after={result.cursor_after or '-'}")
+
+
+def recover_bluebubbles(
+    account: str | None = typer.Option(None, "--account", help="Account label to record."),
+    since: str | None = typer.Option(
+        None,
+        "--since",
+        help="Explicit ISO-8601 lower bound for recovery instead of using the stored cursor.",
+    ),
+    until: str | None = typer.Option(
+        None,
+        "--until",
+        help="Optional ISO-8601 upper bound for recovery instead of now.",
+    ),
+    recover_hours: int = typer.Option(
+        DEFAULT_RECOVERY_HOURS,
+        "--recover-hours",
+        min=1,
+        help="Maximum lookback window when using the stored cursor or no explicit --since.",
+    ),
+    page_size: int = typer.Option(
+        DEFAULT_RECOVERY_PAGE_SIZE,
+        "--page-size",
+        min=1,
+        help="How many BlueBubbles messages to fetch per API page.",
+    ),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+) -> None:
+    """Recover recently missed BlueBubbles messages via the REST API."""
+
+    paths = _paths_for(root)
+    paths.ensure_directories()
+    config = load_bluebubbles_config(paths)
+    resolved_account = account or config.account
+    if not config.server_url:
+        raise typer.BadParameter(
+            f"Missing BlueBubbles server_url in {bluebubbles_config_path(paths)}."
+        )
+
+    password = os.getenv(config.password_env_var)
+    if not password:
+        raise typer.BadParameter(
+            f"Missing BlueBubbles password in environment variable {config.password_env_var}. "
+            f"See {bluebubbles_config_path(paths)} or config/sources/bluebubbles.toml.example."
+        )
+
+    result = recover_bluebubbles_messages(
+        paths,
+        account=resolved_account,
+        server_url=config.server_url,
+        password=password,
+        since=since,
+        until=until,
+        recover_hours=recover_hours,
+        page_size=page_size,
+    )
+    typer.echo("mode=recover")
+    typer.echo(f"account={resolved_account}")
+    typer.echo(f"window_start={result.window_start}")
+    typer.echo(f"window_end={result.window_end}")
+    typer.echo(f"cursor_before={result.cursor_before or '-'}")
+    typer.echo(f"cursor_after={result.cursor_after or '-'}")
+    typer.echo(f"recovered_messages={result.recovered_messages}")
+    typer.echo(f"skipped_existing={result.skipped_existing}")
+    typer.echo(f"pages_fetched={result.pages_fetched}")
+    typer.echo("dates_written=" + (",".join(result.dates_written) if result.dates_written else "-"))
+    typer.echo(
+        "next_step=run 'recall normalize bluebubbles --date YYYY-MM-DD' for each affected date"
+    )
 
 
 def normalize_bluebubbles(
@@ -95,6 +254,39 @@ def sync_bluebubbles_entities(
     typer.echo(f"Synced BlueBubbles entities for {date}")
     typer.echo(f"identities={result.identities_synced}")
     typer.echo(f"identity_aliases={result.aliases_synced}")
+
+
+def show_bluebubbles_state(
+    account: str | None = typer.Option(
+        None, "--account", help="BlueBubbles account label to inspect."
+    ),
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace root to use.",
+    ),
+) -> None:
+    """Show stored BlueBubbles cursor state for one account."""
+
+    paths = _paths_for(root)
+    paths.ensure_directories()
+    config = load_bluebubbles_config(paths)
+    resolved_account = account or config.account
+    cursors = list_connector_cursors(paths, source="bluebubbles", account=resolved_account)
+
+    typer.echo("source=bluebubbles")
+    typer.echo(f"account={resolved_account}")
+    if not cursors:
+        typer.echo("cursor_state=empty")
+        return
+
+    for cursor in cursors:
+        typer.echo(f"cursor_key={cursor.cursor_key}")
+        typer.echo(f"cursor_value={cursor.cursor_value}")
+        typer.echo(f"updated_at={cursor.updated_at}")
 
 
 def import_bluebubbles_export_bundle(

@@ -455,6 +455,115 @@ def test_capture_bluebubbles_serve_reports_webhook_url_hint(tmp_path, monkeypatc
     )
 
 
+def test_capture_bluebubbles_serve_reports_recovery_skip_without_server_url(
+    tmp_path, monkeypatch
+) -> None:
+    config_dir = tmp_path / "config" / "sources"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "bluebubbles.toml").write_text(
+        ('account = "personal"\nwebhook_bind_host = "0.0.0.0"\nwebhook_port = 8042\n'),
+        encoding="utf-8",
+    )
+
+    import recall.connectors.bluebubbles.cli as bluebubbles_cli
+
+    def fake_run(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("stop after startup output")
+
+    monkeypatch.setattr(bluebubbles_cli.uvicorn, "run", fake_run)
+
+    result = runner.invoke(app, ["capture", "bluebubbles", "serve", "--root", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert "recovery_status=skipped" in result.stdout
+    assert "recovery_reason=missing_server_url" in result.stdout
+
+
+def test_capture_bluebubbles_serve_runs_startup_recovery(tmp_path, monkeypatch) -> None:
+    config_dir = tmp_path / "config" / "sources"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "bluebubbles.toml").write_text(
+        (
+            'account = "personal"\n'
+            'webhook_bind_host = "0.0.0.0"\n'
+            "webhook_port = 8042\n"
+            'server_url = "http://10.1.0.9:1234"\n'
+            'password_env_var = "BLUEBUBBLES_PASSWORD"\n'
+        ),
+        encoding="utf-8",
+    )
+
+    import recall.connectors.bluebubbles.cli as bluebubbles_cli
+
+    monkeypatch.setenv("BLUEBUBBLES_PASSWORD", "secret")
+    monkeypatch.setattr(
+        bluebubbles_cli,
+        "recover_bluebubbles_messages",
+        lambda *args, **kwargs: SimpleNamespace(
+            window_start="2026-03-31T20:00:00Z",
+            window_end="2026-03-31T23:00:00Z",
+            recovered_messages=2,
+            skipped_existing=1,
+            dates_written=["2026-03-31"],
+            cursor_before="2026-03-31T20:55:00Z",
+            cursor_after="2026-03-31T21:31:07Z",
+        ),
+    )
+
+    def fake_run(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("stop after startup output")
+
+    monkeypatch.setattr(bluebubbles_cli.uvicorn, "run", fake_run)
+
+    result = runner.invoke(app, ["capture", "bluebubbles", "serve", "--root", str(tmp_path)])
+
+    assert result.exit_code != 0
+    assert "recovery_status=ok" in result.stdout
+    assert "recovered_messages=2" in result.stdout
+    assert "recovery_skipped_existing=1" in result.stdout
+
+
+def test_capture_bluebubbles_recover_reports_next_steps(tmp_path, monkeypatch) -> None:
+    config_dir = tmp_path / "config" / "sources"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "bluebubbles.toml").write_text(
+        (
+            'account = "personal"\n'
+            'server_url = "http://10.1.0.9:1234"\n'
+            'password_env_var = "BLUEBUBBLES_PASSWORD"\n'
+        ),
+        encoding="utf-8",
+    )
+
+    import recall.connectors.bluebubbles.cli as bluebubbles_cli
+
+    monkeypatch.setenv("BLUEBUBBLES_PASSWORD", "secret")
+    monkeypatch.setattr(
+        bluebubbles_cli,
+        "recover_bluebubbles_messages",
+        lambda *args, **kwargs: SimpleNamespace(
+            window_start="2026-03-31T20:00:00Z",
+            window_end="2026-03-31T23:00:00Z",
+            cursor_before="2026-03-31T20:55:00Z",
+            cursor_after="2026-03-31T21:31:07Z",
+            recovered_messages=2,
+            skipped_existing=1,
+            pages_fetched=2,
+            dates_written=["2026-03-31", "2026-04-01"],
+        ),
+    )
+
+    result = runner.invoke(app, ["capture", "bluebubbles", "recover", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "mode=recover" in result.stdout
+    assert "recovered_messages=2" in result.stdout
+    assert "dates_written=2026-03-31,2026-04-01" in result.stdout
+    assert "recall normalize bluebubbles --date YYYY-MM-DD" in result.stdout
+
+
 def test_import_bluebubbles_export_reports_next_steps(tmp_path) -> None:
     export_dir = tmp_path / "bluebubbles-export"
     export_dir.mkdir(parents=True, exist_ok=True)
@@ -1066,6 +1175,14 @@ def test_state_show_slack_reports_empty_state(tmp_path) -> None:
 
     assert result.exit_code == 0
     assert "source=slack" in result.stdout
+    assert "cursor_state=empty" in result.stdout
+
+
+def test_state_show_bluebubbles_reports_empty_state(tmp_path) -> None:
+    result = runner.invoke(app, ["state", "show", "bluebubbles", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "source=bluebubbles" in result.stdout
     assert "cursor_state=empty" in result.stdout
 
 

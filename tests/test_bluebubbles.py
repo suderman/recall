@@ -16,10 +16,12 @@ from recall.connectors.bluebubbles.entities import sync_bluebubbles_entities
 from recall.connectors.bluebubbles.exporter import export_bluebubbles_history
 from recall.connectors.bluebubbles.importer import import_bluebubbles_export
 from recall.connectors.bluebubbles.normalize import normalize_bluebubbles_day
+from recall.connectors.bluebubbles.recovery import recover_bluebubbles_messages
 from recall.connectors.bluebubbles.webhook import create_bluebubbles_webhook_app
 from recall.normalize.events import NormalizedEvent
 from recall.storage.jsonl import read_jsonl, write_normalized_events
 from recall.storage.paths import RecallPaths
+from recall.storage.state import get_connector_cursor
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "bluebubbles" / "new_message.json"
 EXPORT_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "bluebubbles_export"
@@ -130,6 +132,22 @@ class FakeBlueBubblesArtifactClient:
         if url not in self.payloads:
             return httpx.Response(404, request=request)
         return httpx.Response(200, request=request, content=self.payloads[url])
+
+    def close(self) -> None:
+        return None
+
+
+class FakeBlueBubblesRecoveryClient:
+    def __init__(self, payloads: list[dict]) -> None:
+        self.payloads = payloads
+        self.calls: list[tuple[str, dict]] = []
+
+    def post(self, url: str, *, json: dict) -> httpx.Response:
+        self.calls.append((url, json))
+        index = len(self.calls) - 1
+        payload = self.payloads[index] if index < len(self.payloads) else {"data": []}
+        request = httpx.Request("POST", url, json=json)
+        return httpx.Response(200, request=request, json=payload)
 
     def close(self) -> None:
         return None
@@ -283,6 +301,121 @@ def test_import_bluebubbles_export_preserves_bundle_and_partitions_raw_days(tmp_
     assert row["import_id"] == "bb_hist_20260331"
 
 
+def test_recover_bluebubbles_messages_appends_raw_messages_and_advances_cursor(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    client = FakeBlueBubblesRecoveryClient(
+        [
+            {
+                "data": [
+                    {
+                        "guid": "recovered-1",
+                        "text": "Recovered hello",
+                        "dateCreated": 1774978267000,
+                        "isFromMe": False,
+                        "chat": {
+                            "guid": "iMessage;+15551234567",
+                            "displayName": "Ariel",
+                            "participants": [
+                                {"address": "+15551234567"},
+                                {"address": "jon@icloud.com"},
+                            ],
+                        },
+                        "handle": {"address": "+15551234567"},
+                        "attachments": [
+                            {
+                                "guid": "at_recovered_1",
+                                "filename": "IMG_2001.jpeg",
+                                "mimeType": "image/jpeg",
+                                "path": "/Users/jon/Library/Messages/Attachments/ef/gh/IMG_2001.jpeg",
+                                "transferName": "IMG_2001.jpeg",
+                                "totalBytes": 123,
+                            }
+                        ],
+                    }
+                ]
+            },
+            {"data": []},
+        ]
+    )
+
+    result = recover_bluebubbles_messages(
+        paths,
+        account="personal",
+        server_url="http://10.1.0.9:1234",
+        password="secret",
+        since="2026-03-31T20:00:00Z",
+        until="2026-03-31T23:00:00Z",
+        client=client,
+    )
+
+    assert result.recovered_messages == 1
+    assert result.skipped_existing == 0
+    assert result.dates_written == ["2026-03-31"]
+    raw_day_file = paths.raw_capture_dir("bluebubbles", "2026-03-31") / "events.jsonl"
+    row = json.loads(raw_day_file.read_text(encoding="utf-8").splitlines()[0])
+    assert row["capture_mode"] == "recovery"
+    assert row["event_type"] == "historical-message"
+    assert row["payload"]["data"]["guid"] == "recovered-1"
+    cursor = get_connector_cursor(
+        paths,
+        source="bluebubbles",
+        account="personal",
+        cursor_key="last_message_timestamp",
+    )
+    assert cursor is not None
+    assert cursor.cursor_value == "2026-03-31T17:31:07Z"
+    assert client.calls[0][1]["with"] == ["chat", "chat.participants", "attachment", "handle"]
+
+
+def test_recover_bluebubbles_messages_skips_existing_message_guid_overlap(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    append_bluebubbles_event(
+        paths,
+        account="personal",
+        payload=load_fixture(),
+        received_at="2026-03-31T21:31:07Z",
+    )
+    client = FakeBlueBubblesRecoveryClient(
+        [
+            {
+                "data": [
+                    {
+                        "guid": load_fixture()["data"]["guid"],
+                        "text": "Photo from bub https://example.com/story",
+                        "dateCreated": 1774978267000,
+                        "isFromMe": False,
+                        "chat": {
+                            "guid": "iMessage;+15551234567",
+                            "displayName": "Ariel",
+                            "participants": [
+                                {"address": "+15551234567"},
+                                {"address": "jon@icloud.com"},
+                            ],
+                        },
+                        "handle": {"address": "+15551234567"},
+                    }
+                ]
+            },
+            {"data": []},
+        ]
+    )
+
+    result = recover_bluebubbles_messages(
+        paths,
+        account="personal",
+        server_url="http://10.1.0.9:1234",
+        password="secret",
+        since="2026-03-31T21:00:00Z",
+        until="2026-03-31T22:00:00Z",
+        client=client,
+    )
+
+    assert result.recovered_messages == 0
+    assert result.skipped_existing == 1
+    raw_day_file = paths.raw_capture_dir("bluebubbles", "2026-03-31") / "events.jsonl"
+    assert len(raw_day_file.read_text(encoding="utf-8").splitlines()) == 1
+
+
 def test_normalize_bluebubbles_day_reads_imported_historical_messages(tmp_path) -> None:
     paths = RecallPaths.from_root(tmp_path)
     export_dir = copy_export_fixture(tmp_path)
@@ -297,6 +430,28 @@ def test_normalize_bluebubbles_day_reads_imported_historical_messages(tmp_path) 
     assert event_record["source_urls"] == ["https://example.com/old-story"]
     assert artifact_record["source_object_id"] == "at_hist_001"
     assert artifact_record["filename"] == "IMG_0999.jpeg"
+
+
+def test_normalize_bluebubbles_day_dedupes_duplicate_message_guids(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    fixture = load_fixture()
+    append_bluebubbles_event(
+        paths,
+        account="personal",
+        payload=fixture,
+        received_at="2026-03-31T21:31:07Z",
+    )
+    append_bluebubbles_event(
+        paths,
+        account="personal",
+        payload=fixture,
+        received_at="2026-03-31T21:31:08Z",
+    )
+
+    event_path, artifact_path = normalize_bluebubbles_day(paths, date="2026-03-31")
+
+    assert len(event_path.read_text(encoding="utf-8").splitlines()) == 1
+    assert len(artifact_path.read_text(encoding="utf-8").splitlines()) == 1
 
 
 def test_normalize_bluebubbles_day_preserves_existing_other_source_events(tmp_path) -> None:

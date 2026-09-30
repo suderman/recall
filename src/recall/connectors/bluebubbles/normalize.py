@@ -180,6 +180,8 @@ def normalize_bluebubbles_day(paths: RecallPaths, *, date: str) -> tuple[Path, P
     rows = _load_raw_events(events_path)
     events: list[NormalizedEvent] = []
     artifacts: list[NormalizedArtifact] = []
+    seen_event_ids: set[str] = set()
+    seen_artifact_ids: set[str] = set()
 
     for row in rows:
         if row.get("event_type") not in {"new-message", "historical-message"}:
@@ -217,7 +219,16 @@ def normalize_bluebubbles_day(paths: RecallPaths, *, date: str) -> tuple[Path, P
             attachments=attachments,
             local_base_path=local_base_path,
         )
-        artifacts.extend(event_artifacts)
+        if event_id in seen_event_ids:
+            continue
+        seen_event_ids.add(event_id)
+        unique_event_artifacts: list[NormalizedArtifact] = []
+        for artifact in event_artifacts:
+            if artifact.artifact_id in seen_artifact_ids:
+                continue
+            seen_artifact_ids.add(artifact.artifact_id)
+            unique_event_artifacts.append(artifact)
+        artifacts.extend(unique_event_artifacts)
         events.append(
             NormalizedEvent(
                 event_id=event_id,
@@ -233,7 +244,7 @@ def normalize_bluebubbles_day(paths: RecallPaths, *, date: str) -> tuple[Path, P
                 participant_identity_ids=_participants(data),
                 text=text,
                 source_urls=_source_urls(text),
-                artifact_ids=[artifact.artifact_id for artifact in event_artifacts],
+                artifact_ids=[artifact.artifact_id for artifact in unique_event_artifacts],
                 raw_ref=raw_ref,
                 raw_fragment=None,
                 tags=["message", "bluebubbles"],
