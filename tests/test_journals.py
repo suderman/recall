@@ -57,13 +57,22 @@ def test_packet_stable_complete_and_revisions_separate(tmp_path: Path) -> None:
     events = [json.loads(line) for line in (packet / "events.jsonl").read_text().splitlines()]
     assert [row["event_id"] for row in events] == ["evt_break", "evt_mail"]
     assert json.loads((packet / "packet.json").read_text())["coverage"][0]["event_count"] == 0
-    body = "** Work\nI prepared the update.[fn:evt_mail]\n"
+    body = (
+        "** Work\nI prepared the update.[fn:evt_mail][fn:evt_break]\n"
+        "That same evidence supports this sentence.[fn:evt_mail][fn:evt_break]\n"
+    )
     result = save_journal(paths, packet_dir=packet, body=body, model="test-model")
     saved = result.read_bytes()
     assert save_journal(paths, packet_dir=packet, body=body, model="test-model") == result
     different = save_journal(paths, packet_dir=packet, body=body, model="better-model")
     assert different != result and result.read_bytes() == saved
     assert "events.jsonl::2" in result.read_text()
+    assert "events.jsonl::1" in result.read_text()
+    prose = result.read_text().split("** Evidence")[0]
+    assert prose.count("[fn:1]") == 2 and "evt_" not in prose
+    assert "Monday, March 30, 2026" in prose
+    metadata = json.loads((result.parent / "generation.json").read_text())
+    assert metadata["citation_groups"] == [["evt_mail", "evt_break"]]
     assert "telegram" in result.read_text()
     assert paths.normalized_event_path(DAY).read_bytes() == original
     # Edits are never overwritten, even when trying to save the same generated revision again.

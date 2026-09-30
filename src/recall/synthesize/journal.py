@@ -204,6 +204,15 @@ def save_journal(
     indexed = {row["event_id"]: (number, row) for number, row in enumerate(events, 1)}
     if set(cited) - indexed.keys():
         raise ValueError("Journal cites events outside its evidence packet")
+    citation_groups: list[tuple[str, ...]] = []
+
+    def numbered_citation(match: re.Match[str]) -> str:
+        group = tuple(re.findall(r"\[fn:([A-Za-z0-9_-]+)\]", match.group()))
+        if group not in citation_groups:
+            citation_groups.append(group)
+        return f"[fn:{citation_groups.index(group) + 1}]"
+
+    prose = re.sub(r"(?:\[fn:[A-Za-z0-9_-]+\])+", numbered_citation, body.strip())
     day = packet["date"]
     calendar_day = date.fromisoformat(day)
     title = f"{calendar_day:%A, %B} {calendar_day.day}, {calendar_day.year}"
@@ -212,7 +221,7 @@ def save_journal(
         "#+OPTIONS: toc:nil",
         f"* {title}",
         "",
-        body.strip(),
+        prose,
         "",
         "** Evidence",
         ":PROPERTIES:",
@@ -231,36 +240,33 @@ def save_journal(
     if gaps:
         lines.append(_literal("Incomplete or unverified coverage: " + ", ".join(gaps)).rstrip())
     lines.append("Scheduled events do not prove attendance; missing capture is not a quiet day.")
-    for identity in cited:
-        number, row = indexed[identity]
-        stamp = event_datetime(row["timestamp"]).astimezone(ZoneInfo(packet["timezone"]))
-        label = (row["source"] if row["source"] in SOURCES else "Event") + " " + stamp.isoformat()
-        lines.append(
-            f"\n[fn:{identity}] "
-            + _file_link(
-                packet_dir / "events.jsonl",
-                label,
-                number,
+    for footnote, group in enumerate(citation_groups, 1):
+        for position, identity in enumerate(group):
+            number, row = indexed[identity]
+            stamp = event_datetime(row["timestamp"]).astimezone(ZoneInfo(packet["timezone"]))
+            label = (
+                (row["source"] if row["source"] in SOURCES else "Event") + " " + stamp.isoformat()
             )
-        )
-        reference = row.get("raw_ref")
-        if reference:
-            raw = reference["path"]
-            if raw.startswith("local:"):
-                lines.append(_literal(raw + " " + _json(reference["locator"]).strip()).rstrip())
-            else:
-                original = Path(raw)
-                if not original.is_absolute():
-                    original = Path(packet["normalized_path"]).parents[3] / original
-                if original.is_file():
-                    line = reference["locator"].get("line")
-                    lines.append(
-                        _file_link(
-                            original,
-                            "Original evidence",
-                            line if type(line) is int and line > 0 else None,
+            prefix = f"\n[fn:{footnote}] " if position == 0 else ""
+            lines.append(prefix + _file_link(packet_dir / "events.jsonl", label, number))
+            reference = row.get("raw_ref")
+            if reference:
+                raw = reference["path"]
+                if raw.startswith("local:"):
+                    lines.append(_literal(raw + " " + _json(reference["locator"]).strip()).rstrip())
+                else:
+                    original = Path(raw)
+                    if not original.is_absolute():
+                        original = Path(packet["normalized_path"]).parents[3] / original
+                    if original.is_file():
+                        line = reference["locator"].get("line")
+                        lines.append(
+                            _file_link(
+                                original,
+                                "Original evidence",
+                                line if type(line) is int and line > 0 else None,
+                            )
                         )
-                    )
     rendered = "\n".join(lines) + "\n"
     record = _json(
         {
@@ -271,6 +277,7 @@ def save_journal(
             "model": model,
             "generation_options": generation_options or {},
             "body_sha256": _sha(body),
+            "citation_groups": citation_groups,
             "journal_sha256": _sha(rendered),
         }
     )
