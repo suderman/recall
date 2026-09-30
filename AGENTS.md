@@ -183,7 +183,10 @@ Keep this section current as implementation advances.
 - [ ] Remote date-range capture and backfill orchestration across connectors
 - [ ] Deduplication logic across overlapping sources and imports
 - [x] Deterministic cited daily Org evidence timelines with annotation protection
-- [ ] Narrative journals, worklogs, and other derived views
+- [x] Hash-checked journal evidence/prompt packets and cited model-draft revision storage
+- [ ] Automated model-based daily journal generation
+- [ ] Searchable history index over normalized evidence
+- [ ] Worklogs and other derived views
 
 ---
 

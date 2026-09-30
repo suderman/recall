@@ -8,14 +8,14 @@ day, build journals and worklogs, and keep continuity over time.
 
 > capture first, interpret later.
 
-The longer-term outputs are:
+Recall has two primary uses:
 
-- daily journal entries
-- worklogs and timesheets
-- timelines
-- monthly reviews
-- searchable memory
-- historical reconstruction
+- Search history across messages, email, tasks, reminders, calendars, and other
+  evidence to find things worth remembering.
+- Derive readable daily journals with an LLM. Regenerate a day when the entry
+  needs work or a better model becomes available, without changing its evidence.
+
+Worklogs, reviews, and other views can use the same archive later.
 
 ## Why bother
 
@@ -108,6 +108,8 @@ data/
   artifacts/metadata/<source>/<year>/<date>.jsonl
   artifacts/blobs/
   derived/timelines/<year>/<date>.org
+  derived/journal-inputs/<year>/<date>/<packet-hash>/
+  derived/journals/<year>/<date>/<revision-hash>/journal.org
   state/recall.sqlite3
   state/rebuild/
 tests/
@@ -260,11 +262,12 @@ Recall isn't:
 
 ## Near-term goals
 
-- review real daily evidence timelines in Emacs
+- review a readable, cited daily journal and agree its style and evidence selection
+- add local history search with dated snippets and links to original evidence
+- choose model/privacy policy before automating journal generation
 - validate Telegram edge cases and artifact downloads
 - add bounded remote backfill using the existing local replay contract
 - assess conservative overlap deduplication without losing provenance
-- add narrative journals and worklog filtering only after evidence views are useful
 
 ## Development
 
@@ -456,7 +459,7 @@ recall state show slack
 recall events show --date 2026-03-31
 ```
 
-## Rebuild a week and read it in Emacs
+## Rebuild a week and inspect evidence
 
 Rebuild from saved captures and selected local queries into a separate workspace:
 
@@ -504,7 +507,52 @@ A single-writer lock prevents concurrent rebuilds in the same output workspace.
 Timeline display timezone must match rebuild coverage. Rendering refuses to
 run during a rebuild or overwrite edited/unowned timeline files. Keep handwritten
 notes elsewhere. Imported text is fixed-width quoted text; Org blocks and Emacs
-file-local variables are escaped. No model service is used for synthesis.
+file-local variables are escaped. Timeline rendering does not call a model.
+These reports are optional audit output, not the daily journal interface.
+
+## Prepare and save a readable journal
+
+Prepare the day's evidence in the replay workspace:
+
+```bash
+packet="$(nix develop -c recall journal prepare \
+  --root "$HOME/recall-week" --date 2026-03-30 \
+  --author "Your name" --timezone America/Edmonton)"
+```
+
+The packet contains a versioned `prompt.org`, all daily events in `events.jsonl`,
+and hash-checked input/coverage metadata in `packet.json`. Preparation keeps every
+normalized event, including routine alerts that the journal may omit. It does
+not call a model or download anything. Keep these private files out of Git.
+
+Use the packet with an approved model to draft readable prose. The prompt asks
+for a first-person account, related messages combined into conversations, and
+unresolved commitments worth carrying forward. It treats source text as evidence,
+not instructions, and distinguishes calendar plans from known activity. Model
+integration and unattended date-range generation are not implemented yet.
+
+Save the model's Org body in a separate draft file. Use `[fn:EVENT_ID]` citation
+markers from the packet, with optional `**` sections, but no title, links,
+footnote definitions, or executable Org directives. Then save a revision:
+
+```bash
+nix develop -c recall journal save \
+  --root "$HOME/recall-week" --packet "$packet" \
+  --draft /path/to/draft-body.org --model "actual-model-id" \
+  --options '{"style":"first-person factual","temperature":0.2}'
+```
+
+Record the options actually used; omit settings that were not exposed. The
+command prints the readable journal path. Consecutive event citations become
+short numbered footnotes, with source links in a foldable Evidence section.
+Model/input details remain in `generation.json`, outside the main reading text.
+
+Each distinct revision gets its own directory. Repeating the same save returns
+the same revision, and edited files are never overwritten. Later drafts can use
+the same packet and a different model or prompt; changed prompts require a new
+packet. Primary evidence and handwritten notes stay intact. Packet hashes and
+citation membership are checked, not whether each narrative claim is true.
+Review the journal before relying on it.
 
 For checkout-source verification, rather than the packaged CLI:
 
@@ -544,9 +592,11 @@ nix build --no-link
 
 Recall has six normalization paths, local raw capture/import, SQLite identity
 resolution, source-native artifacts, isolated date-range replay, and deterministic
-Org evidence timelines. Replay tests cover exact duplicate IDs, scoped stale
+Org evidence timelines. Local journal preparation and cited draft revision
+storage are also available. Replay tests cover exact duplicate IDs, scoped stale
 removal, download-state preservation, write failures, late arrivals, and local-day
-boundaries including DST.
+boundaries including DST. Journal tests cover evidence integrity, short citations,
+unsafe Org refusal, and preservation of prior or edited revisions.
 
-Remote range backfill, broad Telegram validation, fuzzy overlap matching,
-narrative journals, worklogs, and search indexes remain unfinished.
+Automated model-based journal generation, search indexes, remote range backfill,
+broad Telegram validation, fuzzy overlap matching, and worklogs remain unfinished.
