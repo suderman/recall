@@ -53,10 +53,13 @@ def sync_email_entities(
     date: str,
     extra_query: str | None = None,
     runner: NotmuchRunner | None = None,
+    timezone_name: str = "UTC",
 ) -> EmailEntitySyncResult:
     parse_date(date)
     paths.ensure_directories()
-    messages = load_email_messages(date=date, extra_query=extra_query, runner=runner)
+    messages = load_email_messages(
+        date=date, extra_query=extra_query, runner=runner, timezone_name=timezone_name
+    )
     identity_rows: list[dict[str, Any]] = []
     alias_rows: list[dict[str, Any]] = []
     identity_seen: set[str] = set()

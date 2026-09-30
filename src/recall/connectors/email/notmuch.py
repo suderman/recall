@@ -5,7 +5,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from datetime import date as date_cls
-from datetime import datetime, time, timedelta, timezone
+from datetime import timezone
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
@@ -13,6 +13,8 @@ from email.utils import getaddresses, parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Callable, Iterable
+
+from recall.normalize.time import day_bounds, event_date
 
 URL_PATTERN = re.compile(r'https?://[^\s)>\]"]+')
 MESSAGE_ID_PATTERN = re.compile(r"<([^>]+)>")
@@ -78,20 +80,26 @@ def run_notmuch_command(arguments: list[str]) -> str:
     return result.stdout
 
 
-def build_notmuch_query(date: str, extra_query: str | None = None) -> str:
-    parse_date(date)
-    next_date = date_cls.fromisoformat(date) + timedelta(days=1)
-    parts = [f"date:{date}..{next_date.isoformat()}", "not tag:deleted"]
+def build_notmuch_query(
+    date: str, extra_query: str | None = None, *, timezone_name: str = "UTC"
+) -> str:
+    start, end = day_bounds(date, timezone_name)
+    # notmuch includes both ends, so exclude the next midnight explicitly.
+    parts = [f"date:@{int(start.timestamp())}..@{int(end.timestamp()) - 1}", "not tag:deleted"]
     if extra_query:
         parts.append(f"({extra_query})")
     return " and ".join(parts)
 
 
 def list_message_paths(
-    *, date: str, extra_query: str | None = None, runner: NotmuchRunner | None = None
+    *,
+    date: str,
+    extra_query: str | None = None,
+    runner: NotmuchRunner | None = None,
+    timezone_name: str = "UTC",
 ) -> list[Path]:
     command_runner = runner or run_notmuch_command
-    query = build_notmuch_query(date, extra_query)
+    query = build_notmuch_query(date, extra_query, timezone_name=timezone_name)
     output = command_runner(["notmuch", "search", "--output=files", "--format=text", "--", query])
     paths: list[Path] = []
     seen: set[Path] = set()
@@ -137,7 +145,9 @@ def _dedupe_addresses(addresses: Iterable[EmailAddress]) -> list[EmailAddress]:
     return deduped
 
 
-def _message_timestamp(message: EmailMessage, fallback_date: str) -> tuple[str, list[str]]:
+def _message_timestamp(
+    message: EmailMessage, fallback_date: str, timezone_name: str
+) -> tuple[str, list[str]]:
     tags: list[str] = []
     header_value = message.get("Date")
     if header_value:
@@ -150,7 +160,7 @@ def _message_timestamp(message: EmailMessage, fallback_date: str) -> tuple[str, 
         except (TypeError, ValueError, IndexError, OverflowError):
             pass
     tags.append("timestamp_fallback")
-    fallback = datetime.combine(date_cls.fromisoformat(fallback_date), time(), tzinfo=timezone.utc)
+    fallback = day_bounds(fallback_date, timezone_name)[0].astimezone(timezone.utc)
     return fallback.isoformat().replace("+00:00", "Z"), tags
 
 
@@ -316,12 +326,18 @@ def classify_message(
 
 
 def load_email_messages(
-    *, date: str, extra_query: str | None = None, runner: NotmuchRunner | None = None
+    *,
+    date: str,
+    extra_query: str | None = None,
+    runner: NotmuchRunner | None = None,
+    timezone_name: str = "UTC",
 ) -> list[EmailMessageRecord]:
     parse_date(date)
     records: list[EmailMessageRecord] = []
     seen: set[str] = set()
-    for file_path in list_message_paths(date=date, extra_query=extra_query, runner=runner):
+    for file_path in list_message_paths(
+        date=date, extra_query=extra_query, runner=runner, timezone_name=timezone_name
+    ):
         with file_path.open("rb") as handle:
             message = BytesParser(policy=policy.default).parse(handle)
         message_id = _clean_message_id(message.get("Message-ID"), file_path)
@@ -335,7 +351,10 @@ def load_email_messages(
             [address for address in [sender, *to_addresses, *cc_addresses] if address is not None]
         )
         text = _message_text(message)
-        timestamp, timestamp_tags = _message_timestamp(message, date)
+        timestamp, timestamp_tags = _message_timestamp(message, date, timezone_name)
+        selected_date = event_date(timestamp, timezone_name)
+        if selected_date != date:
+            continue
         tags = classify_message(
             message=message,
             sender=sender,
@@ -350,7 +369,7 @@ def load_email_messages(
                 file_path=file_path,
                 message_id=message_id,
                 timestamp=timestamp,
-                date=timestamp[:10],
+                date=selected_date,
                 subject=str(message.get("Subject") or "").strip(),
                 sender=sender,
                 to_addresses=to_addresses,

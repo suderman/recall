@@ -16,6 +16,7 @@ def _paths_for(root: Path | None) -> RecallPaths:
 def normalize_calendar(
     date: str = typer.Option(..., "--date", help="Date to normalize in YYYY-MM-DD format."),
     account: str = typer.Option("default", "--account", help="Calendar account label to record."),
+    timezone_name: str = typer.Option("UTC", "--timezone", help="IANA timezone for day selection."),
     calendar: list[str] | None = typer.Option(
         None, "--calendar", help="Restrict to named khal calendars."
     ),
@@ -53,6 +54,7 @@ def normalize_calendar(
         calendars=calendar,
         include_canceled=include_canceled,
         config_path=str(config_path) if config_path else None,
+        timezone_name=timezone_name,
     )
     typer.echo(f"Normalized calendar events for {date}")
     typer.echo(f"events={normalized_path}")

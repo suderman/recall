@@ -34,6 +34,7 @@ def normalize_calendar_day(
     include_canceled: bool = True,
     config_path: str | None = None,
     runner: KhalRunner | None = None,
+    timezone_name: str = "UTC",
 ) -> Path:
     parse_date(date)
     paths.ensure_directories()
@@ -43,6 +44,7 @@ def normalize_calendar_day(
         include_canceled=include_canceled,
         config_path=config_path,
         runner=runner,
+        timezone_name=timezone_name,
     )
     events: list[NormalizedEvent] = []
     for record in records:
