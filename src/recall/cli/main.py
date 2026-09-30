@@ -19,6 +19,7 @@ from recall.cli.entities import (
     show_unresolved_identities,
 )
 from recall.cli.events import show_events
+from recall.cli.journal import build as build_journals
 from recall.cli.journal import prepare as prepare_journal
 from recall.cli.journal import save as save_journal
 from recall.cli.rebuild import rebuild
@@ -173,6 +174,7 @@ normalize_app.command("calendar")(normalize_calendar)
 normalize_app.command("asana")(normalize_asana)
 app.command("rebuild")(rebuild)
 timeline_app.command("build")(build_timeline)
+journal_app.command("build")(build_journals)
 journal_app.command("prepare")(prepare_journal)
 journal_app.command("save")(save_journal)
 events_app.command("show")(show_events)

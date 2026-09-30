@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from zoneinfo import ZoneInfoNotFoundError
 
@@ -8,7 +9,32 @@ import typer
 
 from recall.config import resolve_root
 from recall.storage.paths import RecallPaths
+from recall.synthesize.generate import DEFAULT_MODEL, build_journals
 from recall.synthesize.journal import prepare_journal, save_journal
+
+
+def build(
+    first: str = typer.Option(..., "--from"),
+    last: str = typer.Option(..., "--to"),
+    author: str = typer.Option(..., "--author"),
+    output: Path = typer.Option(Path("~/org/journal"), "--output"),
+    timezone_name: str = typer.Option("America/Edmonton", "--timezone"),
+    model: str = typer.Option(DEFAULT_MODEL, "--model"),
+    regenerate: bool = typer.Option(False, "--regenerate"),
+    root: Path | None = typer.Option(None, "--root"),
+) -> None:
+    """Generate cited journals through Pi; resume cached days and protect manual edits."""
+    try:
+        rows = build_journals(
+            RecallPaths.from_root(resolve_root(root)), first=first, last=last,
+            author=author, output=output, timezone_name=timezone_name,
+            model=model, regenerate=regenerate,
+        )
+    except (ValueError, OSError, ZoneInfoNotFoundError, subprocess.TimeoutExpired) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    for row in rows:
+        typer.echo(f"{row['date']} {row['status']} {row['path']}")
 
 
 def prepare(
