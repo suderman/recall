@@ -231,7 +231,9 @@ def save_journal(
     counts = ", ".join(
         f"{row['event_count']} {row['source']}" for row in packet["coverage"] if row["event_count"]
     )
-    lines.append(f"Generated draft based on {counts}. Timezone: ={packet['timezone']}=.")
+    lines.append(
+        _literal(f"Generated draft based on {counts}. Timezone: {packet['timezone']}.").rstrip()
+    )
     gaps = [
         row["source"]
         for row in packet["coverage"]

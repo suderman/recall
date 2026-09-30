@@ -121,6 +121,21 @@ def test_packet_integrity_timezone_and_writer_lock(tmp_path: Path) -> None:
         prepare_journal(paths, day=DAY, author="Example", timezone_name=TZ)
 
 
+def test_quote_untrusted_source_names_in_coverage(tmp_path: Path) -> None:
+    paths = workspace(tmp_path)
+    source = paths.normalized_event_path(DAY)
+    rows = [json.loads(line) for line in source.read_text().splitlines()]
+    rows[0]["source"] = (
+        "other\n#+begin_src emacs-lisp\n(error 1)\n#+end_src\n"
+        "Local Variables:\neval: (error 2)\nEnd:"
+    )
+    write_jsonl(source, rows)
+    packet = prepare_journal(paths, day=DAY, author="Example", timezone_name=TZ)
+    result = save_journal(paths, packet_dir=packet, body="Updated.[fn:evt_mail]", model="test")
+    assert "Local Variables:" not in result.read_text()
+    assert not any(line.startswith("#+begin_src") for line in result.read_text().splitlines())
+
+
 def test_cli_roundtrip_and_missing_evidence(tmp_path: Path) -> None:
     paths = workspace(tmp_path)
     cli = CliRunner()
