@@ -106,20 +106,23 @@ def _validate_references(rows: list[dict[str, Any]]) -> None:
 
 def _preserve_input_downloads(inputs: RecallPaths, source: str,
                               artifacts: list[dict[str, Any]]) -> None:
-    by_id = {row["artifact_id"]: row for row in artifacts}
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    for row in artifacts:
+        by_id.setdefault(row["artifact_id"], []).append(row)
     for path in sorted((inputs.artifacts_metadata / source).rglob("*.jsonl")):
         for previous in read_jsonl(path):
-            row = by_id.get(previous["artifact_id"])
-            if row is None or row["download_status"] != "not_requested":
-                continue
             if previous["download_status"] == "not_requested":
                 continue
-            for field in ("local_path", "checksums", "download_status", "last_error"):
-                row[field] = previous[field]
-            if row["local_path"] and not Path(row["local_path"]).is_absolute():
-                row["local_path"] = str(inputs.root / row["local_path"])
-            if row["size_bytes"] is None:
-                row["size_bytes"] = previous.get("size_bytes")
+            for row in by_id.get(previous["artifact_id"], []):
+                if (row["download_status"] != "not_requested"
+                        and previous["download_status"] not in {"downloaded", "imported"}):
+                    continue
+                for field in ("local_path", "checksums", "download_status", "last_error"):
+                    row[field] = previous[field]
+                if row["local_path"] and not Path(row["local_path"]).is_absolute():
+                    row["local_path"] = str(inputs.root / row["local_path"])
+                if row["size_bytes"] is None:
+                    row["size_bytes"] = previous.get("size_bytes")
 
 
 def _publish_day(output: RecallPaths, source: str, day: str, rows: list[dict[str, Any]],

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import partial
 
-from recall.normalize.rebuild import rebuild_range
+from recall.normalize.rebuild import _preserve_input_downloads, rebuild_range
 from recall.storage.jsonl import read_jsonl, write_jsonl
 from recall.storage.paths import RecallPaths
 
@@ -39,3 +39,11 @@ def test_shared_artifacts_keep_links_and_input_downloads(tmp_path):
     assert preserved["download_status"] == "downloaded"
     assert preserved["local_path"] == str(blob)
     assert preserved["checksums"] == {"sha256": "fixture"}
+    observed = [{**downloaded, "download_status": status,
+                 "local_path": "raw-copy", "checksums": {}}
+                for status in ["not_requested", "imported", "downloaded"]]
+    _preserve_input_downloads(inputs, "bluebubbles", observed)
+    for row in observed:
+        assert row["local_path"] == str(blob)
+        assert row["checksums"] == {"sha256": "fixture"}
+        assert row["download_status"] == "downloaded"
