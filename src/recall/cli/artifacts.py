@@ -407,7 +407,8 @@ def download_telegram_artifact_bytes(
 
     if result.downloaded > 0:
         typer.echo(
-            f"next_step=run 'recall artifacts show --date {date} --source telegram' to inspect local mirrors"
+            f"next_step=run 'recall artifacts show --date {date} --source telegram' "
+            "to inspect local mirrors"
         )
         return
 

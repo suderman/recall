@@ -723,7 +723,8 @@ def test_sync_telegram_entities_resolves_private_chat_identity_to_person(tmp_pat
     assert result.resolutions_synced == 3
     with sqlite3.connect(paths.database) as connection:
         chat_identity = connection.execute(
-            "select person_id from identities where source = 'telegram' and kind = 'chat_id' and value = '1002'"
+            "select person_id from identities where source = 'telegram' "
+            "and kind = 'chat_id' and value = '1002'"
         ).fetchone()
         chat_resolution = connection.execute(
             "select method from resolutions where identity_id = 'ident_telegram_chat_1002'"

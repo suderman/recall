@@ -426,7 +426,8 @@ def run_telegram_tdlib_daemon(
             cycles += 1
             typer.echo(
                 f"cycle={cycles} captured_updates={result.captured_updates} "
-                f"last_update_id={result.last_update_id if result.last_update_id is not None else '-'}"
+                "last_update_id="
+                f"{result.last_update_id if result.last_update_id is not None else '-'}"
             )
 
             if result.last_update_id is not None:

@@ -40,7 +40,8 @@ def _coerce_numeric_id(prefix: str, value: Any) -> int:
 def _import_id(source_path: Path, result: dict[str, Any]) -> str:
     export_name = str(result.get("name") or source_path.stem or source_path.name).strip().lower()
     normalized = re.sub(r"[^a-z0-9]+", "_", export_name).strip("_") or "telegram"
-    return f"telegram_export_{normalized}_{hashlib.sha256(str(source_path.resolve()).encode('utf-8')).hexdigest()[:8]}"
+    digest = hashlib.sha256(str(source_path.resolve()).encode("utf-8")).hexdigest()[:8]
+    return f"telegram_export_{normalized}_{digest}"
 
 
 def _text_from_message(message: dict[str, Any]) -> str:
@@ -64,7 +65,6 @@ def _content_from_message(message: dict[str, Any], export_root: Path) -> dict[st
     text = _text_from_message(message)
     file_path_value = message.get("photo") or message.get("file")
     mime_type = str(message.get("mime_type") or "").strip() or None
-    media_type = str(message.get("media_type") or "").strip()
     if file_path_value:
         relative_path = Path(str(file_path_value))
         local_path = export_root / relative_path
@@ -187,7 +187,8 @@ def _prepare_export_dir(export_path: Path) -> tuple[Path, tempfile.TemporaryDire
 def _copy_export(source_root: Path, destination: Path) -> None:
     if destination.exists():
         raise FileExistsError(
-            f"Telegram export import already exists at {destination}; remove it first or use a different export"
+            f"Telegram export import already exists at {destination}; "
+            "remove it first or use a different export"
         )
     shutil.copytree(source_root, destination)
 

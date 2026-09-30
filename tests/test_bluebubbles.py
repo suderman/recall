@@ -326,7 +326,9 @@ def test_recover_bluebubbles_messages_appends_raw_messages_and_advances_cursor(t
                                 "guid": "at_recovered_1",
                                 "filename": "IMG_2001.jpeg",
                                 "mimeType": "image/jpeg",
-                                "path": "/Users/jon/Library/Messages/Attachments/ef/gh/IMG_2001.jpeg",
+                                "path": (
+                                    "/Users/jon/Library/Messages/Attachments/ef/gh/IMG_2001.jpeg"
+                                ),
                                 "transferName": "IMG_2001.jpeg",
                                 "totalBytes": 123,
                             }
