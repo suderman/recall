@@ -83,4 +83,8 @@ class RecallPaths:
         return self.raw / source / "imports" / import_id
 
     def relative_to_root(self, path: Path) -> str:
-        return path.resolve().relative_to(self.root).as_posix()
+        resolved = path.resolve()
+        # Isolated replay reads raw evidence from a different, authoritative root.
+        if not resolved.is_relative_to(self.root):
+            return resolved.as_posix()
+        return resolved.relative_to(self.root).as_posix()

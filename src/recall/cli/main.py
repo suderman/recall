@@ -19,6 +19,7 @@ from recall.cli.entities import (
     show_unresolved_identities,
 )
 from recall.cli.events import show_events
+from recall.cli.rebuild import rebuild
 from recall.config import resolve_root
 from recall.connectors.asana.cli import (
     import_asana_export_bundle,
@@ -163,6 +164,7 @@ normalize_app.command("telegram")(normalize_telegram)
 normalize_app.command("email")(normalize_email)
 normalize_app.command("calendar")(normalize_calendar)
 normalize_app.command("asana")(normalize_asana)
+app.command("rebuild")(rebuild)
 events_app.command("show")(show_events)
 artifacts_app.command("show")(show_artifacts)
 artifacts_download_app.command("slack")(download_slack_artifact_bytes)
