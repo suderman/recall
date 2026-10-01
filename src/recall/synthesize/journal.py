@@ -40,15 +40,23 @@ Do not return a title, metadata, source blocks, links, or footnote definitions.
   reminders, and receipts do not establish today's exercise or activities.
 - Use names as observed, without inventing identity resolutions or relationships.
 - Do not invent emotions, motives, accomplishments, or explanations for gaps.
-- Omit routine marketing, signatures, tracking URLs, and duplicate notifications
-  unless they carry something worth remembering. Their evidence remains stored.
 - Classification tags are hints. A personal message may be tagged automated or
   non-conversational; read its content before deciding whether it matters.
 
+** Selection
+Prioritize people, family and kids' obligations, project progress, milestones,
+and unresolved commitments. Include meaningful personal check-ins initiated by
+the author, even when an automated classification tag says otherwise.
+Exclude routine marketing, account alerts, password-reset notices, payment and
+transfer notices, receipts, delivery updates, signatures, and tracking URLs.
+A notification belongs only when it documents a meaningful milestone, such as
+channel verification. Do not fill a sparse day with account administration.
+Omitted evidence stays in the archive and remains searchable.
+
 ** Style
-Use concrete, normal prose, not a catalogue of inbox records. Keep the account
-short when evidence is thin. Include unresolved commitments worth carrying
-forward. Do not pad with generic reflections or force a cheerful ending.
+Use concrete, normal prose, not a catalogue of inbox records. Use straight quotes
+and no em dashes. Keep the account short when evidence is thin. Include unresolved
+commitments worth carrying forward. Do not pad with generic reflections or force a cheerful ending.
 Coverage and citation details will be added separately after the body.
 
 ** Input
