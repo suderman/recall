@@ -565,7 +565,7 @@ requests new model output. Old revisions remain intact, and handwritten or
 edited visible entries are never overwritten. No nightly service is installed.
 
 Luna returned invented citation IDs and malformed markers in real tests. Sol
-medium passed the same seven-day range and a second generation of a previously
+medium passed two real-data weeks and a second generation of a previously
 failing day without changing the prompts or validation. This is a limited test,
 not a guarantee. Invalid drafts are rejected, previous entries remain intact,
 and the error points to a retained plain-text draft under
@@ -661,7 +661,8 @@ boundaries including DST. Journal tests cover evidence integrity, short citation
 unsafe Org refusal, and preservation of prior or edited revisions.
 
 Local full-text history search and on-demand Pi journal generation are available.
-Sol medium is the journal default after passing the selected real-data week.
+Sol medium is the journal default after passing two real-data weeks. A first-quarter
+local replay also verified long-range checkpoints and expanded historical search.
 Validation still fails closed and retains rejected drafts. Broader journal
 validation, nightly scheduling, remote range backfill, broad Telegram validation,
 fuzzy overlap matching, and worklogs remain unfinished.

@@ -185,7 +185,8 @@ Keep this section current as implementation advances.
 - [x] Deterministic cited daily Org evidence timelines with annotation protection
 - [x] Hash-checked journal evidence/prompt packets and cited model-draft revision storage
 - [x] On-demand Pi journal runner with checkpointing, revisions, and publication protection
-- [x] Sol medium validation across a real-data week with preserved citations
+- [x] Sol medium validation across two real-data weeks with preserved citations
+- [x] First-quarter local replay and historical search validation with compact provenance
 - [ ] Broader journal validation and nightly scheduling
 - [x] Local SQLite full-text history index with readable, Org, and agent JSON results
 - [ ] Worklogs and other derived views
