@@ -344,6 +344,24 @@ lookup. Historical catch-up can grow the pending queue beyond that cap. Use a
 wall-clock limit for supervised tests. Lookup timeouts retain message text and
 source IDs even when chat or user names are missing.
 
+Drain an existing queue offline with an explicit root and batch limit:
+
+```bash
+recall capture telegram drain --root /path/to/copied-capture --max-updates 1000
+```
+
+This command requires no credentials or TDLib library. It saves receipts through
+the same raw-write, cursor, and acknowledgement checks, then reports the remaining
+count. Run it on a copy for inspection. It changes the selected queue and archive,
+so preserve the original queue together with its raw records and cursor.
+
+Unfrozen messages can use saved chat/user observations from the same account.
+Their objects and observation times are embedded in `payload.saved_context`;
+these labels do not establish a historical name or relationship. Frozen payloads
+remain unchanged, and missing names stay unresolved. Use `recall rebuild` with
+an explicit timezone to group late receipts by message day instead of receipt
+day. An empty queue does not prove complete Telegram history.
+
 Telegram TDLib setup steps:
 
 1. Create or sign into a Telegram account with the phone number you want Recall

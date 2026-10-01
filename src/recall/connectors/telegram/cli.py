@@ -13,7 +13,8 @@ from recall.connectors.telegram.capture import (
     load_update_payload,
 )
 from recall.connectors.telegram.client import FileTelegramClient
-from recall.connectors.telegram.config import load_telegram_config
+from recall.connectors.telegram.config import load_telegram_config, resolve_tdlib_state_dir
+from recall.connectors.telegram.drain import PendingTelegramClient
 from recall.connectors.telegram.entities import (
     sync_telegram_entities as sync_telegram_entities_for_date,
 )
@@ -441,6 +442,40 @@ def run_telegram_tdlib_daemon(
     except KeyboardInterrupt:
         typer.echo("status=stopped")
         raise typer.Exit(code=0) from None
+    finally:
+        client.close()
+
+
+def drain_telegram_pending(
+    root: Path = typer.Option(..., "--root", file_okay=False, resolve_path=True),
+    max_updates: int = typer.Option(..., "--max-updates", min=1),
+    account: str | None = typer.Option(None, "--account"),
+) -> None:
+    """Drain a bounded batch of saved receipts without authentication or network calls."""
+    paths = _paths_for(root)
+    config = load_telegram_config(paths)
+    resolved_account = account or config.account
+    directory = resolve_tdlib_state_dir(paths, config.tdlib_state_dir) / resolved_account
+    client = PendingTelegramClient(paths, account=resolved_account, directory=directory)
+    try:
+        result = capture_telegram_updates(
+            paths,
+            client=client,
+            account=resolved_account,
+            after_update_id=_resolve_after_update_id(
+                paths, account=resolved_account, after_update_id=None
+            ),
+            limit=max_updates,
+            capture_mode="pending-offline",
+        )
+        typer.echo("mode=pending-offline")
+        typer.echo(f"account={resolved_account}")
+        typer.echo(f"captured_updates={result.captured_updates}")
+        typer.echo("dates_written=" + (",".join(result.dates_written) or "-"))
+        typer.echo(
+            f"last_update_id={result.last_update_id if result.last_update_id is not None else '-'}"
+        )
+        typer.echo(f"pending_remaining={client.remaining}")
     finally:
         client.close()
 

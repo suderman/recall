@@ -62,6 +62,7 @@ from recall.connectors.telegram.cli import (
     append_telegram,
     capture_telegram_once,
     capture_telegram_tdlib_once,
+    drain_telegram_pending,
     import_telegram_export_bundle,
     normalize_telegram,
     run_telegram_capture,
@@ -179,6 +180,7 @@ bluebubbles_capture_app.command("recover")(recover_bluebubbles)
 telegram_capture_app.command("append")(append_telegram)
 telegram_capture_app.command("once")(capture_telegram_once)
 telegram_capture_app.command("run")(run_telegram_capture)
+telegram_capture_app.command("drain")(drain_telegram_pending)
 telegram_capture_app.command("tdlib-daemon")(run_telegram_tdlib_daemon)
 telegram_capture_app.command("tdlib-once")(capture_telegram_tdlib_once)
 telegram_capture_app.command("tdlib-run")(run_telegram_tdlib_capture)
