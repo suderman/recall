@@ -322,8 +322,9 @@ def test_normalize_slack_day_builds_daily_events(tmp_path) -> None:
         },
     }
 
-    bot_message = next(row for row in records
-                       if row["sender_identity_id"] == "ident_slack_bot_BHELPER")
+    bot_message = next(
+        row for row in records if row["sender_identity_id"] == "ident_slack_bot_BHELPER"
+    )
     assert bot_message["sender_identity_id"] == "ident_slack_bot_BHELPER"
     assert bot_message["source_urls"] == []
     assert bot_message["artifact_ids"] == []

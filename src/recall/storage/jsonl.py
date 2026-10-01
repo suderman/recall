@@ -134,8 +134,10 @@ def write_artifact_metadata(
         row = artifact.to_record()
         previous = by_id.get(artifact.artifact_id)
         # Normalizers observe artifacts; they must not replace already acquired bytes.
-        if previous and (row["download_status"] == "not_requested"
-                         or previous["download_status"] in {"downloaded", "imported"}):
+        if previous and (
+            row["download_status"] == "not_requested"
+            or previous["download_status"] in {"downloaded", "imported"}
+        ):
             for field in ("local_path", "checksums", "download_status", "last_error"):
                 row[field] = previous[field]
             if row["size_bytes"] is None:

@@ -22,8 +22,13 @@ def rebuild(
     """Rebuild from local evidence only. No remote capture or canonical-store writes."""
     try:
         jobs = rebuild_range(
-            RecallPaths.from_root(resolve_root(root)), RecallPaths.from_root(output_root),
-            first=first, last=last, sources=source, timezone_name=timezone_name, account=account,
+            RecallPaths.from_root(resolve_root(root)),
+            RecallPaths.from_root(output_root),
+            first=first,
+            last=last,
+            sources=source,
+            timezone_name=timezone_name,
+            account=account,
         )
     except (ValueError, OSError, ZoneInfoNotFoundError) as exc:
         typer.echo(str(exc), err=True)

@@ -18,8 +18,12 @@ def build_timeline(
 ) -> None:
     """Build deterministic Org evidence timelines. Refuse to overwrite edited views."""
     try:
-        paths = build_timelines(RecallPaths.from_root(resolve_root(root)),
-                                first=first, last=last, timezone_name=timezone_name)
+        paths = build_timelines(
+            RecallPaths.from_root(resolve_root(root)),
+            first=first,
+            last=last,
+            timezone_name=timezone_name,
+        )
     except (ValueError, OSError, ZoneInfoNotFoundError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc

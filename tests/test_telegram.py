@@ -1321,8 +1321,9 @@ def test_tdlib_client_prompts_for_code_when_interactive(tmp_path) -> None:
         settings=settings,
         auth_timeout_seconds=1.0,
         receive_timeout_seconds=0.01,
-        prompt_callback=lambda message, hide_input: prompts.append((message, hide_input))
-        or "24680",
+        prompt_callback=lambda message, hide_input: (
+            prompts.append((message, hide_input)) or "24680"
+        ),
         is_interactive=True,
     )
 

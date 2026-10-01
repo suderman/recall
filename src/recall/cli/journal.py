@@ -26,9 +26,14 @@ def build(
     """Generate cited journals through Pi; resume cached days and protect manual edits."""
     try:
         rows = build_journals(
-            RecallPaths.from_root(resolve_root(root)), first=first, last=last,
-            author=author, output=output, timezone_name=timezone_name,
-            model=model, regenerate=regenerate,
+            RecallPaths.from_root(resolve_root(root)),
+            first=first,
+            last=last,
+            author=author,
+            output=output,
+            timezone_name=timezone_name,
+            model=model,
+            regenerate=regenerate,
         )
     except (ValueError, OSError, ZoneInfoNotFoundError, subprocess.TimeoutExpired) as exc:
         typer.echo(str(exc), err=True)

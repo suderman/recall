@@ -107,11 +107,15 @@ def test_changed_evidence_regenerates_and_busy_writer(tmp_path: Path, monkeypatc
 @pytest.mark.parametrize("fault", ["error", "length", "wrong_model", "tools", "truncated", "json"])
 def test_pi_protocol_rejects_failed_or_wrong_routes(tmp_path: Path, monkeypatch, fault) -> None:
     message: dict[str, Any] = {
-        "role": "assistant", "provider": "codex-lb", "model": "gpt-6.1-sol",
-        "stopReason": "stop", "content": [{"type": "text", "text": "Prepared.[fn:evt_mail]"}],
+        "role": "assistant",
+        "provider": "codex-lb",
+        "model": "gpt-6.1-sol",
+        "stopReason": "stop",
+        "content": [{"type": "text", "text": "Prepared.[fn:evt_mail]"}],
     }
     stream: list[dict[str, Any]] = [
-        {"type": "message_end", "message": message}, {"type": "agent_settled"}
+        {"type": "message_end", "message": message},
+        {"type": "agent_settled"},
     ]
     if fault in {"error", "length"}:
         message["stopReason"] = fault

@@ -91,8 +91,12 @@ def test_artifact_replay_preserves_download_state_and_other_accounts(tmp_path, o
         paths, source="slack", date="2026-03-31", artifacts=[downloaded, other]
     )
     fresh = NormalizedArtifact(
-        artifact_id="a", source="slack", kind="file", account="work",
-        event_ids=["new"], download_status=observed_status,
+        artifact_id="a",
+        source="slack",
+        kind="file",
+        account="work",
+        event_ids=["new"],
+        download_status=observed_status,
         local_path="raw-copy" if observed_status != "not_requested" else None,
     )
     jsonl.write_artifact_metadata(
@@ -107,11 +111,20 @@ def test_artifact_replay_preserves_download_state_and_other_accounts(tmp_path, o
 
 def test_shared_imported_artifacts_union_event_links(tmp_path):
     paths = RecallPaths.from_root(tmp_path)
-    artifact = NormalizedArtifact(artifact_id="shared", source="bluebubbles", kind="image",
-                                  download_status="imported", local_path="image.jpg",
-                                  event_ids=["one"])
-    path = jsonl.write_artifact_metadata(paths, source="bluebubbles", date="2026-03-31",
-                                        artifacts=[artifact, replace(artifact, event_ids=["two"])])
+    artifact = NormalizedArtifact(
+        artifact_id="shared",
+        source="bluebubbles",
+        kind="image",
+        download_status="imported",
+        local_path="image.jpg",
+        event_ids=["one"],
+    )
+    path = jsonl.write_artifact_metadata(
+        paths,
+        source="bluebubbles",
+        date="2026-03-31",
+        artifacts=[artifact, replace(artifact, event_ids=["two"])],
+    )
     assert jsonl.read_jsonl(path)[0]["event_ids"] == ["one", "two"]
 
 

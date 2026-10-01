@@ -83,7 +83,7 @@ def test_real_khal_with_non_iso_locale_all_day_and_recurrence(tmp_path):
     calendar.mkdir()
     for uid, body in {
         "weekly": "DTSTART:20260324T150000Z\nDTEND:20260324T160000Z\n"
-                  "RRULE:FREQ=WEEKLY;COUNT=3\nSUMMARY:Weekly\nSTATUS:CANCELLED\n",
+        "RRULE:FREQ=WEEKLY;COUNT=3\nSUMMARY:Weekly\nSTATUS:CANCELLED\n",
         "day": "DTSTART;VALUE=DATE:20260331\nDTEND;VALUE=DATE:20260401\nSUMMARY:All day\n",
     }.items():
         (calendar / f"{uid}.ics").write_text(

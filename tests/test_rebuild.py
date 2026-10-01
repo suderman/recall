@@ -20,19 +20,32 @@ def _workspaces(tmp_path):
 
 def _telegram(inputs, capture_day="2026-04-02", timestamp="2026-04-01T05:59:59Z"):
     path = inputs.raw_capture_dir("telegram", capture_day) / "updates.jsonl"
-    row = {"account": "personal", "received_at": "2026-04-02T12:00:00Z",
-           "payload": {"message": {"id": 1, "chat_id": 42,
-                                   "date": int(datetime.fromisoformat(timestamp).timestamp()),
-                                   "content": {"@type": "messageText",
-                                               "text": {"text": "Late arrival"}}}}}
+    row = {
+        "account": "personal",
+        "received_at": "2026-04-02T12:00:00Z",
+        "payload": {
+            "message": {
+                "id": 1,
+                "chat_id": 42,
+                "date": int(datetime.fromisoformat(timestamp).timestamp()),
+                "content": {"@type": "messageText", "text": {"text": "Late arrival"}},
+            }
+        },
+    }
     write_jsonl(path, [row, row])
     return path
 
 
 def _run(inputs, output, sources=None, **options):
-    return replay.rebuild_range(inputs, output, first="2026-03-31", last="2026-04-02",
-                                sources=sources or ["telegram"],
-                                timezone_name="America/Edmonton", **options)
+    return replay.rebuild_range(
+        inputs,
+        output,
+        first="2026-03-31",
+        last="2026-04-02",
+        sources=sources or ["telegram"],
+        timezone_name="America/Edmonton",
+        **options,
+    )
 
 
 def test_late_arrival_exact_dedupe_and_cached_resume(tmp_path, monkeypatch):
@@ -82,8 +95,14 @@ def test_scoped_rebuild_and_proven_empty_preserve_other_accounts(tmp_path):
     inputs, output = _workspaces(tmp_path)
     _telegram(inputs, capture_day="2026-03-31")
     _run(inputs, output, account="personal")
-    other = NormalizedEvent(event_id="other", source="telegram", account="work",
-                            date="2026-03-31", timestamp="2026-03-31T12:00:00Z", kind="message")
+    other = NormalizedEvent(
+        event_id="other",
+        source="telegram",
+        account="work",
+        date="2026-03-31",
+        timestamp="2026-03-31T12:00:00Z",
+        kind="message",
+    )
     write_normalized_events(output, "2026-03-31", [other], merge_existing=True)
     write_jsonl(inputs.raw_capture_dir("telegram", "2026-03-31") / "updates.jsonl", [])
     jobs = _run(inputs, output, account="personal")
@@ -94,8 +113,10 @@ def test_scoped_rebuild_and_proven_empty_preserve_other_accounts(tmp_path):
 
 def test_unsupported_is_not_empty(tmp_path):
     inputs, output = _workspaces(tmp_path)
-    write_jsonl(inputs.raw_capture_dir("telegram", "2026-03-31") / "updates.jsonl",
-                [{"payload": {"@type": "unknown"}}])
+    write_jsonl(
+        inputs.raw_capture_dir("telegram", "2026-03-31") / "updates.jsonl",
+        [{"payload": {"@type": "unknown"}}],
+    )
     assert _run(inputs, output)[0]["status"] == "unsupported"
     assert not output.normalized_event_path("2026-03-31").exists()
 
@@ -128,9 +149,17 @@ def test_fixture_sources_together(tmp_path):
 
     import_asana_export(inputs, export_path=fixtures / "asana", account="work")
     payload = json.loads((fixtures / "bluebubbles/new_message.json").read_text())
-    write_jsonl(inputs.raw_capture_dir("bluebubbles", "2026-03-31") / "events.jsonl",
-                [{"event_type": "new-message", "account": "personal", "payload": payload,
-                  "received_at": "2026-03-31T12:00:00Z"}])
+    write_jsonl(
+        inputs.raw_capture_dir("bluebubbles", "2026-03-31") / "events.jsonl",
+        [
+            {
+                "event_type": "new-message",
+                "account": "personal",
+                "payload": payload,
+                "received_at": "2026-03-31T12:00:00Z",
+            }
+        ],
+    )
     jobs = _run(inputs, output, list(replay.RAW_SOURCES))
     assert not [job for job in jobs if job["status"] == "failed"]
     rows = read_jsonl(output.normalized_event_path("2026-03-31"))
