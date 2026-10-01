@@ -4,6 +4,7 @@ import ctypes
 import json
 import os
 import time
+from collections import deque
 from ctypes.util import find_library
 from dataclasses import dataclass
 from getpass import getpass
@@ -179,6 +180,7 @@ class TdlibTelegramClient(TelegramCaptureClient):
         self._auth_timeout_seconds = auth_timeout_seconds
         self._receive_timeout_seconds = receive_timeout_seconds
         self._ready = False
+        self._pending_updates: deque[TelegramUpdate] = deque()
         self._chat_cache: dict[int, dict[str, Any]] = {}
         self._user_cache: dict[int, dict[str, Any]] = {}
         self._prompt_callback = prompt_callback or _default_prompt_callback
@@ -186,6 +188,23 @@ class TdlibTelegramClient(TelegramCaptureClient):
 
     def close(self) -> None:
         self._transport.close()
+
+    def _receive(self, timeout: float) -> dict[str, Any] | None:
+        event = self._transport.receive(max(0.0, timeout))
+        if event is not None:
+            event_type = str(event.get("@type") or "")
+            if event_type == "updateAuthorizationState":
+                self._handle_authorization_state(event.get("authorization_state"))
+            elif event_type.startswith("update"):
+                # Requests and unsolicited updates share one stream. Keep receipt order/time.
+                self._pending_updates.append(
+                    TelegramUpdate(
+                        update_type=event_type,
+                        payload=event,
+                        received_at=current_timestamp(),
+                    )
+                )
+        return event
 
     def get_updates(
         self,
@@ -198,31 +217,24 @@ class TdlibTelegramClient(TelegramCaptureClient):
         next_update_id = (after_update_id or 0) + 1
         deadline = time.monotonic() + self._receive_timeout_seconds
 
-        while True:
-            timeout = max(0.0, min(self._receive_timeout_seconds, deadline - time.monotonic()))
-            event = self._transport.receive(timeout)
-            if event is None:
-                break
+        while limit is None or len(updates) < limit:
+            if not self._pending_updates:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or self._receive(remaining) is None:
+                    break
+                if not self._pending_updates:
+                    continue
 
-            event_type = str(event.get("@type") or "")
-            if event_type == "updateAuthorizationState":
-                self._handle_authorization_state(event.get("authorization_state"))
-                continue
-            if not event_type.startswith("update"):
-                continue
-
-            payload = self._enrich_update(event)
+            update = self._pending_updates.popleft()
             updates.append(
                 TelegramUpdate(
-                    update_type=event_type,
-                    payload=payload,
+                    update_type=update.update_type,
+                    payload=self._enrich_update(update.payload),
                     update_id=next_update_id,
-                    received_at=current_timestamp(),
+                    received_at=update.received_at,
                 )
             )
             next_update_id += 1
-            if limit is not None and len(updates) >= limit:
-                break
 
         return updates
 
@@ -250,13 +262,10 @@ class TdlibTelegramClient(TelegramCaptureClient):
         )
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
-            event = self._transport.receive(self._receive_timeout_seconds)
+            event = self._receive(min(self._receive_timeout_seconds, deadline - time.monotonic()))
             if event is None:
                 continue
             event_type = str(event.get("@type") or "")
-            if event_type == "updateAuthorizationState":
-                self._handle_authorization_state(event.get("authorization_state"))
-                continue
             if event_type == "updateFile":
                 file = event.get("file")
                 if isinstance(file, dict) and int(file.get("id") or 0) == int(file_id):
@@ -308,12 +317,8 @@ class TdlibTelegramClient(TelegramCaptureClient):
         self._transport.send(payload)
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
-            event = self._transport.receive(self._receive_timeout_seconds)
+            event = self._receive(min(self._receive_timeout_seconds, deadline - time.monotonic()))
             if event is None:
-                continue
-            event_type = str(event.get("@type") or "")
-            if event_type == "updateAuthorizationState":
-                self._handle_authorization_state(event.get("authorization_state"))
                 continue
             if event.get("@extra") == extra:
                 return event
@@ -326,14 +331,11 @@ class TdlibTelegramClient(TelegramCaptureClient):
         self._transport.send({"@type": "getAuthorizationState"})
         deadline = time.monotonic() + self._auth_timeout_seconds
         while time.monotonic() < deadline:
-            event = self._transport.receive(self._receive_timeout_seconds)
+            event = self._receive(min(self._receive_timeout_seconds, deadline - time.monotonic()))
             if event is None:
                 continue
-            if str(event.get("@type") or "") == "updateAuthorizationState":
-                self._handle_authorization_state(event.get("authorization_state"))
-                if self._ready:
-                    return
-                continue
+            if self._ready:
+                return
             if str(event.get("@type") or "") == "error":
                 raise RuntimeError(f"TDLib error during authorization: {event}")
 
@@ -478,7 +480,7 @@ class TdlibTelegramClient(TelegramCaptureClient):
     def _get_chat(self, chat_id: int) -> dict[str, Any] | None:
         if chat_id in self._chat_cache:
             return self._chat_cache[chat_id]
-        chat = self._transport.execute({"@type": "getChat", "chat_id": chat_id})
+        chat = self._request({"@type": "getChat", "chat_id": chat_id}, timeout_seconds=5.0)
         if chat is None or str(chat.get("@type") or "") == "error":
             return None
         self._chat_cache[chat_id] = chat
@@ -487,7 +489,7 @@ class TdlibTelegramClient(TelegramCaptureClient):
     def _get_user(self, user_id: int) -> dict[str, Any] | None:
         if user_id in self._user_cache:
             return self._user_cache[user_id]
-        user = self._transport.execute({"@type": "getUser", "user_id": user_id})
+        user = self._request({"@type": "getUser", "user_id": user_id}, timeout_seconds=5.0)
         if user is None or str(user.get("@type") or "") == "error":
             return None
         self._user_cache[user_id] = user

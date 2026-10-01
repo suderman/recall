@@ -318,6 +318,11 @@ Configure Telegram TDLib capture by copying `config/sources/telegram.toml.exampl
 to `config/sources/telegram.toml`, then export the configured environment
 variables before running any `recall capture telegram tdlib-*` command.
 
+Chat and user lookups use asynchronous TDLib requests. Updates received during
+authorization, lookups, or file downloads stay queued in receipt order for the
+next capture poll, with their original receipt timestamps. The queue lasts for
+the client process; it is not a durable checkpoint across process shutdown.
+
 Telegram TDLib setup steps:
 
 1. Create or sign into a Telegram account with the phone number you want Recall

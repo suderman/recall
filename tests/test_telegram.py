@@ -29,16 +29,19 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "telegram"
 
 class FakeTdlibTransport:
     def __init__(
-        self, responses: list[dict], *, execute_responses: dict[tuple[str, int], dict] | None = None
+        self, responses: list[dict], *, request_responses: dict[tuple[str, int], dict] | None = None
     ):
         self.responses = list(responses)
-        self.execute_responses = execute_responses or {}
+        self.request_responses = request_responses or {}
         self.sent: list[dict] = []
         self.executed: list[dict] = []
         self.closed = False
 
     def send(self, query: dict) -> None:
         self.sent.append(query)
+        key = (str(query.get("@type")), int(query.get("chat_id") or query.get("user_id") or 0))
+        if key in self.request_responses:
+            self.responses.append({**self.request_responses[key], "@extra": query["@extra"]})
 
     def receive(self, timeout: float) -> dict | None:
         del timeout
@@ -48,8 +51,7 @@ class FakeTdlibTransport:
 
     def execute(self, query: dict) -> dict | None:
         self.executed.append(query)
-        key = (str(query.get("@type")), int(query.get("chat_id") or query.get("user_id") or 0))
-        return self.execute_responses.get(key)
+        return {"@type": "error", "code": 400, "message": "Can't execute synchronously"}
 
     def close(self) -> None:
         self.closed = True
@@ -1230,7 +1232,7 @@ def test_tdlib_client_authenticates_and_enriches_update(tmp_path) -> None:
                 },
             },
         ],
-        execute_responses={
+        request_responses={
             ("getChat", 1001): {"id": 1001, "title": "Ariel", "participant_user_ids": [42]},
             (
                 "getUser",
@@ -1351,7 +1353,7 @@ def test_tdlib_client_enriches_private_chat_participants(tmp_path) -> None:
                 },
             },
         ],
-        execute_responses={
+        request_responses={
             (
                 "getChat",
                 1002,

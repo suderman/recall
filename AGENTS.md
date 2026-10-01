@@ -160,6 +160,7 @@ Keep this section current as implementation advances.
 - [x] BlueBubbles webhook capture, normalization, historical export import, and artifact byte download support
 - [x] BlueBubbles short-outage recovery via REST message pull, cursor state, and CLI/state inspection
 - [x] Telegram TDLib capture with append, once, run, and daemon commands
+- [x] Asynchronous Telegram chat/user enrichment with ordered update retention during requests
 - [x] Telegram Desktop export import/backfill for extracted directories and zip bundles
 - [x] Telegram normalization for text, photos, documents, voice notes, video, animation, audio, stickers, and video notes
 - [x] Telegram artifact byte download support using local-path, file-id, and remote-id fallback through TDLib
