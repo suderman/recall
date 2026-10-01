@@ -499,7 +499,10 @@ a successful local query or a proven empty capture.
 Statuses describe saved/query evidence, not complete capture coverage.
 
 `data/state/rebuild/manifest.jsonl` records each source/day result, options,
-input hashes, entity/configuration hashes, code hash, and query snapshot hash.
+entity/configuration hashes, code hash, and query snapshot hash. Each job's
+`input_manifest` points to `data/state/rebuild/inputs/<fingerprint>.jsonl`, which
+stores the input-hash map once per source fingerprint instead of once per day.
+This keeps long-range checkpoints small without losing provenance.
 Raw inputs resume from hash-checked caches; email and calendar are queried again.
 Rerun the same command after interruption. Keep raw evidence and checkpoint
 files. Rewritten files are atomic, but the range is not one database transaction.

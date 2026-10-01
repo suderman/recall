@@ -289,7 +289,8 @@ def _rebuild(inputs: RecallPaths, output: RecallPaths, days: list[str], sources:
                     snapshot_hash = file_hash(snapshot)
                 job = {"source": source, "date": day, "status": status, "event_count": len(rows),
                        "error": error, "fingerprint": fingerprint, "options": options,
-                       "input_manifest": output.relative_to_root(input_manifest), "entity_hash": entity_hash,
+                       "input_manifest": output.relative_to_root(input_manifest),
+                       "entity_hash": entity_hash,
                        "entity_config_hashes": config_hashes,
                        "code_hash": hashlib.sha256(
                            json.dumps(code, sort_keys=True).encode()).hexdigest(),
