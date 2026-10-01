@@ -522,8 +522,10 @@ nix develop -c recall search query "client name" --json
 
 The local SQLite FTS5 index covers normalized evidence, not just journal prose.
 It includes text, conversation titles, raw details, and observed identity labels.
-Later included roots override exact repeated event IDs; calendar day memberships
-are retained. Labels are observations, not automatic person merges.
+Later included roots override exact repeated event IDs and replace their day
+memberships. Multiple calendar days within the winning root remain searchable.
+Date filters use stored day partitions. Labels are observations, not automatic
+person merges.
 
 Queries match all supplied words. Results default to newest captured timestamps;
 use `--relevance` for ranked text matches. Add `--source`, `--identity`, date
