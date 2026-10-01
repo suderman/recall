@@ -188,6 +188,7 @@ Keep this section current as implementation advances.
 - [x] Hash-checked journal evidence/prompt packets with explicit accepted replay overlays and cited model-draft revision storage
 - [x] On-demand Pi journal runner with checkpointing, revisions, and publication protection
 - [x] Checked journal publication and separate-body review without another model request
+- [x] On-demand isolated capture/replay/journal preview orchestration with explicit source gaps
 - [x] Sol medium validation across two real-data weeks with preserved citations
 - [x] First-quarter local replay and historical search validation with compact provenance
 - [ ] Broader journal validation and nightly scheduling

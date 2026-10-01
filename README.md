@@ -674,6 +674,53 @@ and the error points to a retained plain-text draft under
 the prose too.
 The selection policy favors people and milestones over routine account notices.
 
+### Run capture, replay, and previews together
+
+```bash
+nix develop -c recall journal run \
+  --root "$PWD" --workspace "$HOME/recall-runs/2026-03-30" \
+  --from 2026-03-30 --to 2026-03-30 --author "Your name" \
+  --source slack --source bluebubbles --source telegram \
+  --source email --source calendar --source asana \
+  --timezone America/Edmonton
+```
+
+This command replays selected sources from raw evidence and local queries, then
+uses the same approved Pi route to generate previews. It does not use existing
+normalized files as its replay input. Without `--capture-slack`, it makes no
+remote capture calls and does not load Slack credentials. Email and calendar
+queries still run against the local authoritative stores.
+
+To include a bounded Slack API pull, add `--capture-slack` when starting a new
+run. The account label and archived-conversation setting come from the source
+configuration; `--slack-account` and `--include-archived` or `--exclude-archived`
+override them. The account label does not select a workspace. Only Slack has
+remote capture in this command. Other sources need existing capture/imports or
+local query tools. Slack's token visibility, retention, and thread-window limits
+still apply, and artifact bytes are not downloaded.
+
+The dedicated workspace must not overlap the source root or its data/configuration
+paths. It refuses unowned contents and nested workspace symlinks. `run.json` binds the input root,
+dates, selected sources, timezone, and capture settings. Repeat the same command
+to resume; choose a new workspace for a different scope. Existing capture,
+replay, and model checkpoints handle retries. Local queries run again, and
+changed evidence, author, or model can require new generation.
+
+Results print capture limits and replay status before generation. Failed or
+unsupported replay stops generation for the range; missing and empty sources
+remain explicit coverage gaps. Newly captured Slack is a later exact-ID overlay
+on the primary replay, so an earlier missing Slack capture can be followed by a
+successful captured overlay. Days without evidence print `no-evidence` and skip
+the model. An older preview is retained and reported, not presented as current.
+
+Previews are always under `WORKSPACE/preview/YYYY/MM/YYYY-MM-DD.org`. Packets,
+revisions, and generation state belong to `WORKSPACE/replay`; captured Slack raw
+bundles and their normalized overlay belong to `WORKSPACE/capture` and
+`WORKSPACE/slack-replay`. No canonical events, live cursors, search index, or main
+journal entries are updated. Review a printed revision and use `journal publish
+--root WORKSPACE/replay --revision REVISION --output "$HOME/org/journal"` to
+publish it separately. No service or timer is installed.
+
 ### Review before publication
 
 Use `journal build --output "$HOME/recall-preview"` to keep generated entries
@@ -823,6 +870,6 @@ commands in the user's agent workflow.
 Sol medium is the journal default after passing two real-data weeks. A first-quarter
 local replay also verified long-range checkpoints and expanded historical search.
 Validation still fails closed and retains rejected drafts. Broader journal
-validation, nightly scheduling, real-workspace Slack backfill validation, other
-remote range connectors, broad Telegram validation, fuzzy overlap matching, and
+validation, nightly scheduling, other remote range connectors, broad Telegram
+validation, fuzzy overlap matching, and
 worklogs remain unfinished.

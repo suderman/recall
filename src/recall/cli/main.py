@@ -23,6 +23,7 @@ from recall.cli.events import show_events
 from recall.cli.journal import build as build_journals
 from recall.cli.journal import prepare as prepare_journal
 from recall.cli.journal import publish as publish_journal
+from recall.cli.journal import run as run_journals
 from recall.cli.journal import save as save_journal
 from recall.cli.lookup import person as recall_person
 from recall.cli.lookup import project as recall_project
@@ -189,6 +190,7 @@ normalize_app.command("calendar")(normalize_calendar)
 normalize_app.command("asana")(normalize_asana)
 app.command("rebuild")(rebuild)
 timeline_app.command("build")(build_timeline)
+journal_app.command("run")(run_journals)
 journal_app.command("build")(build_journals)
 journal_app.command("prepare")(prepare_journal)
 journal_app.command("save")(save_journal)
