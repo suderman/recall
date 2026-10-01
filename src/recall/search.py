@@ -68,7 +68,7 @@ def build_index(
     roots: list[RecallPaths],
     index: Path | None = None,
 ) -> dict[str, Any]:
-    """Overlay later roots by exact event ID; retain every observed day partition."""
+    """Overlay later roots by exact ID, retaining day partitions from the winning root."""
     if not roots:
         raise ValueError("At least one input root is required")
     target = (index or roots[0].derived / "search.sqlite3").expanduser().resolve()
@@ -119,7 +119,8 @@ def build_index(
                 assignments = ",".join(f"{key}=excluded.{key}" for key in COLUMNS.split(",")[1:])
                 sql = f"INSERT INTO events({COLUMNS}) VALUES({','.join(['?'] * 13)}) "
                 sql += "ON CONFLICT(event_id) DO UPDATE SET " + assignments
-                for _paths, path in files:
+                seen_in_root: set[tuple[Path, str]] = set()
+                for paths, path in files:
                     date.fromisoformat(path.stem)
                     data = path.read_bytes()
                     inputs[str(path)] = hashlib.sha256(data).hexdigest()
@@ -170,6 +171,12 @@ def build_index(
                             number,
                         )
                         connection.execute(sql, values)
+                        key = (paths.root, row["event_id"])
+                        if key not in seen_in_root:
+                            connection.execute(
+                                "DELETE FROM event_dates WHERE event_id=?", (row["event_id"],)
+                            )
+                            seen_in_root.add(key)
                         connection.execute(
                             "INSERT OR IGNORE INTO event_dates VALUES(?,?)",
                             (row["event_id"], row["date"]),
