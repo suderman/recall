@@ -19,13 +19,14 @@ def event(
     text: str = "Roof project",
     timestamp: str = "2026-03-30T10:00:00Z",
     source: str = "email",
+    kind: str = "message",
 ) -> dict:
     return {
         "event_id": event_id,
         "date": day,
         "timestamp": timestamp,
         "source": source,
-        "kind": "message",
+        "kind": kind,
         "account": "personal",
         "text": text,
         "sender_identity_id": "phone_1",
@@ -107,6 +108,19 @@ def test_exact_overlays_calendar_days_and_rebuild_removes_stale(tmp_path: Path) 
     write(original, [])
     build_index([original, replay])
     assert len(search(index)) == 1
+
+
+def test_calendar_membership_survives_partial_root_overlay(tmp_path: Path) -> None:
+    week = RecallPaths.from_root(tmp_path / "week")
+    quarter = RecallPaths.from_root(tmp_path / "quarter")
+    for day in ("2026-03-31", "2026-04-01", "2026-04-02"):
+        write(week, [event("break", day=day, source="calendar", kind="calendar_event")], day)
+    write(quarter, [event("break", source="calendar", kind="calendar_event")])
+    index = Path(build_index([week, quarter])["index"])
+    result = search(index, first="2026-04-02", last="2026-04-02")
+    assert len(result) == 1
+    assert result[0]["dates"] == ["2026-03-30", "2026-03-31", "2026-04-01", "2026-04-02"]
+    assert result[0]["normalized_path"].startswith(str(quarter.root))
 
 
 def test_invalid_input_failed_replace_and_unowned_outputs_preserve_bytes(

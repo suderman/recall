@@ -68,7 +68,7 @@ def build_index(
     roots: list[RecallPaths],
     index: Path | None = None,
 ) -> dict[str, Any]:
-    """Overlay later roots by exact ID, retaining day partitions from the winning root."""
+    """Overlay exact IDs; retain observed calendar days across partial input roots."""
     if not roots:
         raise ValueError("At least one input root is required")
     target = (index or roots[0].derived / "search.sqlite3").expanduser().resolve()
@@ -172,7 +172,7 @@ def build_index(
                         )
                         connection.execute(sql, values)
                         key = (paths.root, row["event_id"])
-                        if key not in seen_in_root:
+                        if key not in seen_in_root and row["kind"] != "calendar_event":
                             connection.execute(
                                 "DELETE FROM event_dates WHERE event_id=?", (row["event_id"],)
                             )
