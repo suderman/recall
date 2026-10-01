@@ -108,6 +108,8 @@ data/
   artifacts/metadata/<source>/<year>/<date>.jsonl
   artifacts/blobs/
   derived/timelines/<year>/<date>.org
+  derived/search.sqlite3
+  derived/journal-failures/<date>/<attempt-hash>/
   derived/journal-inputs/<year>/<date>/<packet-hash>/
   derived/journals/<year>/<date>/<revision-hash>/journal.org
   state/recall.sqlite3
@@ -262,9 +264,8 @@ Recall isn't:
 
 ## Near-term goals
 
-- review a readable, cited daily journal and agree its style and evidence selection
-- add local history search with dated snippets and links to original evidence
-- choose model/privacy policy before automating journal generation
+- improve Luna's citation reliability before unattended journal generation
+- review generated journals for relevance and factual claims
 - validate Telegram edge cases and artifact downloads
 - add bounded remote backfill using the existing local replay contract
 - assess conservative overlap deduplication without losing provenance
@@ -510,6 +511,59 @@ notes elsewhere. Imported text is fixed-width quoted text; Org blocks and Emacs
 file-local variables are escaped. Timeline rendering does not call a model.
 These reports are optional audit output, not the daily journal interface.
 
+## Search saved history
+
+```bash
+nix develop -c recall search index --root "$PWD" --include-root "$HOME/recall-week"
+nix develop -c recall search query "school" --from 2026-03-27 --to 2026-04-02
+nix develop -c recall search query "client name" --org
+nix develop -c recall search query "client name" --json
+```
+
+The local SQLite FTS5 index covers normalized evidence, not just journal prose.
+It includes text, conversation titles, raw details, and observed identity labels.
+Later included roots override exact repeated event IDs; calendar day memberships
+are retained. Labels are observations, not automatic person merges.
+
+Queries match all supplied words. Results default to newest captured timestamps;
+use `--relevance` for ranked text matches. Add `--source`, `--identity`, date
+bounds, or `--limit` to narrow results. JSON includes full event records and
+physical source references for an agent. Org output has quoted snippets and
+links to normalized and available original evidence. Calendar locators remain
+explicit where no local file link exists. The last captured record does not
+prove the last real interaction.
+
+Rebuild the index after changing normalized evidence. It is a snapshot, not a
+live query of remote systems. Failed indexing preserves the previous database.
+The index lives under `data/derived/`; it is not the primary event store. Org
+notes and journal text can still be searched in Emacs. They are not imported
+into this evidence index. There is no web UI or natural-language search service.
+
+## Generate journals on demand
+
+```bash
+nix develop -c recall journal build \
+  --root "$HOME/recall-week" --from 2026-03-27 --to 2026-04-02 \
+  --author "Your name" --output "$HOME/org/journal" \
+  --timezone America/Edmonton --model codex-lb/gpt-6-luna:high
+```
+
+This uses the configured Pi provider route with tools, extensions, skills,
+project context, and session persistence disabled. Only the journal instructions
+and evidence packet enter the request. Remote transmission requires the user's
+approval. The default route is `codex-lb/gpt-6-luna:high`.
+
+Entries publish under `~/org/journal/YYYY/MM/YYYY-MM-DD.org`. Completed days are
+checkpointed; unchanged inputs/options reuse saved responses. `--regenerate`
+requests new model output. Old revisions remain intact, and handwritten or
+edited visible entries are never overwritten. No nightly service is installed.
+
+Luna sometimes invents citation IDs or returns malformed markers. Invalid drafts
+are rejected, previous entries remain intact, and the error points to a retained
+plain-text draft under `data/derived/journal-failures/`. Do not rely on unattended
+generation yet. Citation membership is not a truth check; review the prose too.
+The selection policy favors people and milestones over routine account notices.
+
 ## Prepare and save a readable journal
 
 Prepare the day's evidence in the replay workspace:
@@ -528,8 +582,7 @@ not call a model or download anything. Keep these private files out of Git.
 Use the packet with an approved model to draft readable prose. The prompt asks
 for a first-person account, related messages combined into conversations, and
 unresolved commitments worth carrying forward. It treats source text as evidence,
-not instructions, and distinguishes calendar plans from known activity. Model
-integration and unattended date-range generation are not implemented yet.
+not instructions, and distinguishes calendar plans from known activity. The on-demand runner uses this same packet/revision workflow.
 
 Save the model's Org body in a separate draft file. Use `[fn:EVENT_ID]` citation
 markers from the packet, with optional `**` sections, but no title, links,
@@ -598,5 +651,8 @@ removal, download-state preservation, write failures, late arrivals, and local-d
 boundaries including DST. Journal tests cover evidence integrity, short citations,
 unsafe Org refusal, and preservation of prior or edited revisions.
 
-Automated model-based journal generation, search indexes, remote range backfill,
-broad Telegram validation, fuzzy overlap matching, and worklogs remain unfinished.
+Local full-text history search and on-demand Pi journal generation are available.
+Real Luna runs exposed unreliable citation formatting and invented IDs; validation
+fails closed and retains rejected drafts. Reliable unattended generation, remote
+range backfill, broad Telegram validation, fuzzy overlap matching, and worklogs
+remain unfinished.
