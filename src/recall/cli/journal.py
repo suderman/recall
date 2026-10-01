@@ -9,7 +9,7 @@ import typer
 
 from recall.config import resolve_root
 from recall.storage.paths import RecallPaths
-from recall.synthesize.generate import DEFAULT_MODEL, build_journals
+from recall.synthesize.generate import DEFAULT_MODEL, build_journals, publish_journal
 from recall.synthesize.journal import prepare_journal, save_journal
 
 
@@ -42,6 +42,28 @@ def build(
         raise typer.Exit(1) from exc
     for row in rows:
         typer.echo(f"{row['date']} {row['status']} {row['path']}")
+        typer.echo(f"Revision: {row['revision']}")
+
+
+def publish(
+    revision: Path = typer.Option(..., "--revision", exists=True, dir_okay=False),
+    output: Path = typer.Option(Path("~/org/journal"), "--output"),
+    draft: Path | None = typer.Option(None, "--draft", exists=True, dir_okay=False),
+    root: Path | None = typer.Option(None, "--root"),
+) -> None:
+    """Publish a checked revision or separately corrected body. Does not call a model."""
+    try:
+        result = publish_journal(
+            RecallPaths.from_root(resolve_root(root)),
+            revision=revision,
+            output=output,
+            draft=draft.read_text(encoding="utf-8") if draft is not None else None,
+        )
+    except (ValueError, OSError, ZoneInfoNotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"{result['date']} {result['status']} {result['path']}")
+    typer.echo(f"Revision: {result['revision']}")
 
 
 def prepare(

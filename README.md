@@ -674,6 +674,38 @@ and the error points to a retained plain-text draft under
 the prose too.
 The selection policy favors people and milestones over routine account notices.
 
+### Review before publication
+
+Use `journal build --output "$HOME/recall-preview"` to keep generated entries
+away from the main journal while reviewing them. Each result also prints its
+immutable `journal.org` revision path. Publish that revision without another
+model request:
+
+```bash
+nix develop -c recall journal publish \
+  --root "$HOME/recall-week" \
+  --revision /path/to/immutable/revision/journal.org \
+  --output "$HOME/org/journal"
+```
+
+To correct prose, copy the revision's `body.org` to a separate file and keep its
+`[fn:EVENT_ID]` markers. Do not edit the immutable revision or the numbered
+footnotes in a rendered journal. Pass the corrected body with
+`journal publish --draft /path/to/reviewed-body.org` and the same options above.
+Recall saves a new revision, retains the original model metadata, and records
+the original revision and body hash in its review metadata. It does not claim
+that the model wrote the corrected body or that the claims passed a truth check.
+
+Publication checks the packet and all revision hashes, revalidates citation IDs
+and Org safety, and refuses handwritten edits or a busy writer. Output must be
+outside the primary and packet input roots' Recall data directories. Repeat
+publication is safe; interrupted replacement can resume through its checkpoint.
+For native Pi revisions with matching prompt/system hashes, the next unchanged
+`journal build` reuses the reviewed body. Externally saved revisions lacking
+those runner hashes can be published but do not seed the Pi generation cache.
+Publication uses the frozen evidence packet, even if live evidence has since
+changed. A later build prepares current evidence and regenerates when needed.
+
 ## Prepare and save a readable journal
 
 Prepare the day's evidence in the replay workspace:

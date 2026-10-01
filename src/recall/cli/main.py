@@ -22,6 +22,7 @@ from recall.cli.entities import (
 from recall.cli.events import show_events
 from recall.cli.journal import build as build_journals
 from recall.cli.journal import prepare as prepare_journal
+from recall.cli.journal import publish as publish_journal
 from recall.cli.journal import save as save_journal
 from recall.cli.lookup import person as recall_person
 from recall.cli.lookup import project as recall_project
@@ -191,6 +192,7 @@ timeline_app.command("build")(build_timeline)
 journal_app.command("build")(build_journals)
 journal_app.command("prepare")(prepare_journal)
 journal_app.command("save")(save_journal)
+journal_app.command("publish")(publish_journal)
 search_app.command("index")(build_search_index)
 search_app.command("query")(search_history)
 search_app.command("person")(recall_person)
