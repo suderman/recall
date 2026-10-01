@@ -39,6 +39,7 @@ Do not return a title, metadata, source blocks, links, or footnote definitions.
 - Task activity does not establish work hours. Newsletters, weekly reports,
   reminders, and receipts do not establish today's exercise or activities.
 - Use names as observed, without inventing identity resolutions or relationships.
+  Do not infer gender from a name; use the name instead of an unsupported pronoun.
 - Do not invent emotions, motives, accomplishments, or explanations for gaps.
 - Classification tags are hints. A personal message may be tagged automated or
   non-conversational; read its content before deciding whether it matters.
@@ -221,10 +222,11 @@ def save_journal(
             citation_groups.append(group)
         return f"[fn:{citation_groups.index(group) + 1}]"
 
+    prose = re.sub(r"([=~])(\[fn:[A-Za-z0-9_-]+\])\1", r"\2", body.strip())
     prose = re.sub(
         r"\[fn:[A-Za-z0-9_-]+\](?:[ \t]*\[fn:[A-Za-z0-9_-]+\])*",
         numbered_citation,
-        body.strip(),
+        prose,
     )
     day = packet["date"]
     calendar_day = date.fromisoformat(day)

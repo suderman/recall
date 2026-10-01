@@ -60,6 +60,7 @@ def test_packet_stable_complete_and_revisions_separate(tmp_path: Path) -> None:
     body = (
         "** Work\nI prepared the update.[fn:evt_mail][fn:evt_break]\n"
         "That same evidence supports this sentence.[fn:evt_mail] [fn:evt_break]\n"
+        "Literal-looking citations still work.=[fn:evt_mail]= ~[fn:evt_break]~\n"
     )
     result = save_journal(paths, packet_dir=packet, body=body, model="test-model")
     saved = result.read_bytes()
@@ -69,7 +70,7 @@ def test_packet_stable_complete_and_revisions_separate(tmp_path: Path) -> None:
     assert "events.jsonl::2" in result.read_text()
     assert "events.jsonl::1" in result.read_text()
     prose = result.read_text().split("** Evidence")[0]
-    assert prose.count("[fn:1]") == 2 and "evt_" not in prose
+    assert prose.count("[fn:1]") == 3 and "evt_" not in prose
     assert "Monday, March 30, 2026" in prose
     metadata = json.loads((result.parent / "generation.json").read_text())
     assert metadata["citation_groups"] == [["evt_mail", "evt_break"]]
