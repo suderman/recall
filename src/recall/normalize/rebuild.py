@@ -23,6 +23,7 @@ from recall.connectors.slack.entities import sync_slack_entities
 from recall.connectors.slack.normalize import normalize_slack_day
 from recall.connectors.telegram.entities import sync_telegram_entities
 from recall.connectors.telegram.normalize import normalize_telegram_day
+from recall.entities.observations import retain_labels
 from recall.normalize.artifacts import NormalizedArtifact, RemoteLocator
 from recall.normalize.events import NormalizedEvent, RawReference
 from recall.normalize.time import day_bounds, event_date
@@ -156,6 +157,7 @@ def rebuild_range(
     Raw inputs are cached by content, code, options, and entity snapshot. Local
     queries are always repeated because their authoritative stores may change.
     A missing capture day is not an empty result, even after scanning late arrivals.
+    Retain labels for published identities without publishing mutable resolution state.
     """
     days = date_range(first, last)
     day_bounds(first, timezone_name)
@@ -299,6 +301,7 @@ def _rebuild(inputs: RecallPaths, output: RecallPaths, days: list[str], sources:
                        "capture_day_present": any(path.name == day for path in capture_dirs)}
                 if status in {"success", "captured-empty", "queried-empty"}:
                     _publish_day(output, source, day, rows, artifacts, account)
+                    retain_labels(staging, output, rows)
                 if (source in RAW_SOURCES and cache.exists()
                         and artifact_cache.exists() and not failure):
                     job.update(events_hash=file_hash(cache),

@@ -1,4 +1,4 @@
-"""A rebuildable local full-text index, not a replacement for evidence."""
+"""A rebuildable local index over normalized evidence and observed identity labels."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from recall.entities.observations import LABELS_PATH
+from recall.entities.observations import observed_labels as read_identity_labels
 from recall.normalize.time import event_datetime
 from recall.storage.paths import RecallPaths
 from recall.synthesize.timeline import _file_link, _literal
@@ -42,21 +44,6 @@ CREATE VIRTUAL TABLE events_fts USING fts5(title,text,labels,details,
 
 def _read_only(path: Path) -> sqlite3.Connection:
     return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
-
-
-def _labels(paths: RecallPaths) -> dict[str, list[str]]:
-    result: dict[str, list[str]] = {}
-    if not paths.database.exists():
-        return result
-    with closing(_read_only(paths.database)) as connection:
-        connection.execute("BEGIN")
-        for identity, value, label in connection.execute(
-            "SELECT identity_id,value,label FROM identities"
-        ):
-            result[identity] = [item for item in (value, label) if item]
-        for identity, value in connection.execute("SELECT identity_id,value FROM identity_aliases"):
-            result.setdefault(identity, []).append(value)
-    return result
 
 
 def _owned(connection: sqlite3.Connection) -> None:
@@ -111,7 +98,11 @@ def build_index(
             with closing(sqlite3.connect(temporary)) as connection:
                 connection.executescript(SCHEMA)
                 connection.execute("INSERT INTO metadata VALUES('format',?)", (FORMAT,))
-                labels_by_root = {paths.root: _labels(paths) for paths in roots}
+                for paths in roots:
+                    snapshot = paths.state / LABELS_PATH
+                    if snapshot.exists():
+                        inputs[str(snapshot)] = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+                labels_by_root = {paths.root: read_identity_labels(paths) for paths in roots}
                 observed_labels: dict[str, set[str]] = {}
                 for labels in labels_by_root.values():
                     for identity, values in labels.items():
@@ -225,6 +216,7 @@ def search(
     identity: str | None = None,
     limit: int = 20,
     relevance: bool = False,
+    oldest: bool = False,
 ) -> list[dict[str, Any]]:
     if not 1 <= limit <= 500:
         raise ValueError("Search limit must be between 1 and 500")
@@ -258,11 +250,8 @@ def search(
         where.append("EXISTS (SELECT 1 FROM event_dates d WHERE " + " AND ".join(conditions) + ")")
     join = "JOIN events_fts ON events_fts.rowid=e.rowid" if terms else ""
     snippet = "snippet(events_fts,1,'[',']',' ... ',24)" if terms else "substr(e.text,1,300)"
-    order = (
-        "events_fts.rank,e.instant DESC,e.event_id"
-        if relevance and terms
-        else ("e.instant DESC,e.event_id")
-    )
+    time_order = "e.instant ASC,e.event_id" if oldest else "e.instant DESC,e.event_id"
+    order = "events_fts.rank," + time_order if relevance and terms else time_order
     sql = f"SELECT e.event_json,e.path,e.line,e.labels,{snippet} FROM events e {join}"
     if where:
         sql += " WHERE " + " AND ".join(where)
@@ -293,19 +282,21 @@ def search(
         return results
 
 
-def render_results(rows: list[dict[str, Any]], *, org: bool = False) -> str:
+def render_results(
+    rows: list[dict[str, Any]], *, org: bool = False, header: bool = True, level: int = 2
+) -> str:
     lines = (
         [
             "#+TITLE: Recall search results",
             "",
             "Captured evidence, not proof of the last real interaction.",
         ]
-        if org
+        if org and header
         else []
     )
     for number, result in enumerate(rows, 1):
         event = result["event"]
-        lines.append(f"** Result {number}" if org else f"Result {number}")
+        lines.append(f"{'*' * level} Result {number}" if org else f"Result {number}")
         lines.append(
             _literal(
                 f"{event['timestamp']} | {event['source']} | "

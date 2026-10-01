@@ -22,6 +22,8 @@ from recall.cli.events import show_events
 from recall.cli.journal import build as build_journals
 from recall.cli.journal import prepare as prepare_journal
 from recall.cli.journal import save as save_journal
+from recall.cli.lookup import person as recall_person
+from recall.cli.lookup import project as recall_project
 from recall.cli.rebuild import rebuild
 from recall.cli.search import (
     index as build_search_index,
@@ -74,7 +76,7 @@ normalize_app = typer.Typer(help="Normalize captured evidence into daily events.
 events_app = typer.Typer(help="Inspect normalized events.")
 timeline_app = typer.Typer(help="Build deterministic Org evidence timelines.")
 journal_app = typer.Typer(help="Generate readable journals and preserve cited revisions.")
-search_app = typer.Typer(help="Search normalized history with readable or agent-friendly results.")
+search_app = typer.Typer(help="Search history and inspect person/project evidence.")
 artifacts_app = typer.Typer(help="Inspect normalized artifact metadata.")
 artifacts_download_app = typer.Typer(help="Download source-native artifact bytes.")
 entities_app = typer.Typer(help="Manage identity and entity storage.")
@@ -187,6 +189,8 @@ journal_app.command("prepare")(prepare_journal)
 journal_app.command("save")(save_journal)
 search_app.command("index")(build_search_index)
 search_app.command("query")(search_history)
+search_app.command("person")(recall_person)
+search_app.command("project")(recall_project)
 events_app.command("show")(show_events)
 artifacts_app.command("show")(show_artifacts)
 artifacts_download_app.command("slack")(download_slack_artifact_bytes)
