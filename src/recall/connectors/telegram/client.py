@@ -13,6 +13,7 @@ class TelegramUpdate:
     payload: dict[str, Any]
     update_id: int | None = None
     received_at: str | None = None
+    receipt_id: int | None = None
 
 
 class TelegramCaptureClient(Protocol):
@@ -22,6 +23,8 @@ class TelegramCaptureClient(Protocol):
         after_update_id: int | None = None,
         limit: int | None = None,
     ) -> list[TelegramUpdate]: ...
+
+    def acknowledge_update(self, receipt_id: int) -> None: ...
 
 
 def _record_to_update(record: dict[str, Any]) -> TelegramUpdate:
@@ -82,3 +85,7 @@ class FileTelegramClient:
         if limit is not None:
             rows = list(rows)[:limit]
         return list(rows)
+
+    def acknowledge_update(self, receipt_id: int) -> None:
+        # File-backed inputs are already durable and do not carry queue receipts.
+        del receipt_id

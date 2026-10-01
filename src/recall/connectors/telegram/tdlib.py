@@ -6,7 +6,7 @@ import os
 import time
 from collections import deque
 from ctypes.util import find_library
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from getpass import getpass
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -19,6 +19,7 @@ from recall.connectors.telegram.config import (
     read_config_env,
     resolve_tdlib_state_dir,
 )
+from recall.connectors.telegram.pending import PendingUpdates
 from recall.storage.paths import RecallPaths
 
 AUTH_TIMEOUT_SECONDS = 30.0
@@ -180,14 +181,27 @@ class TdlibTelegramClient(TelegramCaptureClient):
         self._auth_timeout_seconds = auth_timeout_seconds
         self._receive_timeout_seconds = receive_timeout_seconds
         self._ready = False
-        self._pending_updates: deque[TelegramUpdate] = deque()
+        try:
+            self._pending = PendingUpdates(
+                settings.database_directory.parent, account=settings.account
+            )
+            self._pending_updates: deque[int] = deque(self._pending.receipt_ids())
+        except BaseException:
+            self._transport.close()
+            raise
         self._chat_cache: dict[int, dict[str, Any]] = {}
         self._user_cache: dict[int, dict[str, Any]] = {}
         self._prompt_callback = prompt_callback or _default_prompt_callback
         self._is_interactive = os.isatty(0) if is_interactive is None else is_interactive
 
     def close(self) -> None:
-        self._transport.close()
+        try:
+            self._transport.close()
+        finally:
+            self._pending.close()
+
+    def acknowledge_update(self, receipt_id: int) -> None:
+        self._pending.acknowledge(receipt_id)
 
     def _receive(self, timeout: float) -> dict[str, Any] | None:
         event = self._transport.receive(max(0.0, timeout))
@@ -196,14 +210,9 @@ class TdlibTelegramClient(TelegramCaptureClient):
             if event_type == "updateAuthorizationState":
                 self._handle_authorization_state(event.get("authorization_state"))
             elif event_type.startswith("update"):
-                # Requests and unsolicited updates share one stream. Keep receipt order/time.
-                self._pending_updates.append(
-                    TelegramUpdate(
-                        update_type=event_type,
-                        payload=event,
-                        received_at=current_timestamp(),
-                    )
-                )
+                # Commit each receipt before enrichment can receive another update.
+                receipt_id = self._pending.append(event, current_timestamp())
+                self._pending_updates.append(receipt_id)
         return event
 
     def get_updates(
@@ -212,9 +221,10 @@ class TdlibTelegramClient(TelegramCaptureClient):
         after_update_id: int | None = None,
         limit: int | None = None,
     ) -> list[TelegramUpdate]:
+        self._pending.seed_id(after_update_id)
+        self._pending_updates = deque(self._pending.receipt_ids())
         self._ensure_ready()
         updates: list[TelegramUpdate] = []
-        next_update_id = (after_update_id or 0) + 1
         deadline = time.monotonic() + self._receive_timeout_seconds
 
         while limit is None or len(updates) < limit:
@@ -225,16 +235,14 @@ class TdlibTelegramClient(TelegramCaptureClient):
                 if not self._pending_updates:
                     continue
 
-            update = self._pending_updates.popleft()
-            updates.append(
-                TelegramUpdate(
-                    update_type=update.update_type,
-                    payload=self._enrich_update(update.payload),
-                    update_id=next_update_id,
-                    received_at=update.received_at,
-                )
-            )
-            next_update_id += 1
+            receipt_id = self._pending_updates[0]
+            update, enriched = self._pending.prepare(receipt_id)
+            if not enriched:
+                payload = self._enrich_update(update.payload)
+                self._pending.complete(receipt_id, payload)
+                update = replace(update, payload=payload)
+            self._pending_updates.popleft()
+            updates.append(update)
 
         return updates
 

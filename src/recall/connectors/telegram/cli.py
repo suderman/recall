@@ -91,6 +91,9 @@ def _capture_updates_from_tdlib(
     paths = _paths_for(root)
     paths.ensure_directories()
     config = load_telegram_config(paths)
+    after_update_id = _resolve_after_update_id(
+        paths, account=account, after_update_id=after_update_id
+    )
     settings = build_tdlib_auth_settings(paths, config, account=account)
     if tdlib_log_verbosity_level is not None:
         settings = replace(settings, log_verbosity_level=tdlib_log_verbosity_level)

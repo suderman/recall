@@ -319,9 +319,30 @@ to `config/sources/telegram.toml`, then export the configured environment
 variables before running any `recall capture telegram tdlib-*` command.
 
 Chat and user lookups use asynchronous TDLib requests. Updates received during
-authorization, lookups, or file downloads stay queued in receipt order for the
-next capture poll, with their original receipt timestamps. The queue lasts for
-the client process; it is not a durable checkpoint across process shutdown.
+authorization, lookups, or file downloads are committed to a private per-account
+`pending.sqlite3` beside the TDLib database and files directories. One process
+may use that account state at a time. Pending updates survive client shutdown
+and replay in receipt order, with stable local IDs and receipt timestamps.
+Enriched payloads are frozen before delivery to the capture writer.
+
+Capture removes a receipt only after its raw JSONL record is flushed to disk
+and the Recall cursor is saved. A retry after raw save checks the existing
+record instead of appending it again. Conflicting records and corrupt queues
+stop capture without dropping the pending receipt. All `tdlib-*` capture
+commands read the stored cursor unless explicitly overridden. Local update IDs
+are counters, not Telegram history-completeness markers.
+
+This is at-least-once delivery for updates already committed to the pending
+queue. It does not recover updates TDLib never delivered or prove complete
+historical coverage. A crash during a raw append can leave a malformed final
+JSONL line; capture then stops for repair while retaining the pending receipt.
+Keep the queue together with its account state and archive. Do not copy test
+TDLib state over canonical state or delete pending files to bypass an error.
+
+Batch limits cap returned updates, not updates received while waiting for a
+lookup. Historical catch-up can grow the pending queue beyond that cap. Use a
+wall-clock limit for supervised tests. Lookup timeouts retain message text and
+source IDs even when chat or user names are missing.
 
 Telegram TDLib setup steps:
 

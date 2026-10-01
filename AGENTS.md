@@ -161,6 +161,7 @@ Keep this section current as implementation advances.
 - [x] BlueBubbles short-outage recovery via REST message pull, cursor state, and CLI/state inspection
 - [x] Telegram TDLib capture with append, once, run, and daemon commands
 - [x] Asynchronous Telegram chat/user enrichment with ordered update retention during requests
+- [x] Durable Telegram pending receipts with post-capture acknowledgement and stable restart replay
 - [x] Telegram Desktop export import/backfill for extracted directories and zip bundles
 - [x] Telegram normalization for text, photos, documents, voice notes, video, animation, audio, stickers, and video notes
 - [x] Telegram artifact byte download support using local-path, file-id, and remote-id fallback through TDLib

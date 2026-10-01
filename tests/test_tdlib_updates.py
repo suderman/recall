@@ -50,7 +50,11 @@ def test_async_enrichment_keeps_order_timestamps_and_limits(tmp_path, monkeypatc
         receive_timeout_seconds=0.01,
     )
     first = client.get_updates(after_update_id=100, limit=1)
+    assert first[0].receipt_id is not None
+    client.acknowledge_update(first[0].receipt_id)
     second = client.get_updates(after_update_id=101, limit=1)
+    assert second[0].receipt_id is not None
+    client.acknowledge_update(second[0].receipt_id)
     rest = client.get_updates(after_update_id=102)
     updates = first + second + rest
 
@@ -63,6 +67,9 @@ def test_async_enrichment_keeps_order_timestamps_and_limits(tmp_path, monkeypatc
     assert rest[0].payload == file_update
     assert [q["@type"] for q in transport.sent] == ["getAuthorizationState", "getChat", "getUser"]
     assert not transport.executed
+    for update in rest:
+        assert update.receipt_id is not None
+        client.acknowledge_update(update.receipt_id)
     assert client.get_updates(after_update_id=104) == []
 
 
@@ -81,6 +88,8 @@ def test_lookup_failure_keeps_message_and_unrelated_updates(tmp_path, monkeypatc
     )
     client._ready = True
     first = client.get_updates(after_update_id=10, limit=1)
+    assert first[0].receipt_id is not None
+    client.acknowledge_update(first[0].receipt_id)
     remaining = client.get_updates(after_update_id=11)
     assert first[0].payload["message"] == message(1)["message"]
     assert "chat" not in first[0].payload

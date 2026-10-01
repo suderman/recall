@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from recall.connectors.telegram.client import TelegramCaptureClient
-from recall.storage.jsonl import write_jsonl
+from recall.storage.jsonl import read_jsonl, write_jsonl
 from recall.storage.paths import RecallPaths
 from recall.storage.state import ConnectorCursor, set_connector_cursor
 
@@ -68,6 +69,9 @@ def append_telegram_envelope(
     paths.ensure_directories()
     raw_dir, updates_path = raw_capture_paths(paths, date)
     write_jsonl(updates_path, [envelope], append=True)
+    # Raw evidence must reach disk before the cursor or pending acknowledgement.
+    with updates_path.open("rb") as handle:
+        os.fsync(handle.fileno())
     return TelegramCaptureResult(date=date, raw_dir=raw_dir, updates_path=updates_path)
 
 
@@ -129,17 +133,67 @@ def capture_telegram_updates(
     dates_written: list[str] = []
     last_update_id: int | None = None
     cursor: ConnectorCursor | None = None
+    saved_days: dict[str, dict[tuple[str, int], dict[str, Any]]] = {}
 
     for update in updates:
-        result = append_telegram_update(
-            paths,
-            account=account,
-            payload=update.payload,
-            update_type=update.update_type,
-            update_id=update.update_id,
-            received_at=update.received_at,
-            capture_mode=capture_mode,
-        )
+        saved = None
+        if update.receipt_id is not None:
+            assert update.update_id is not None and update.received_at is not None
+            day = local_date_for_timestamp(update.received_at)
+            if day not in saved_days:
+                _, raw_path = raw_capture_paths(paths, day)
+                saved_days[day] = (
+                    {
+                        (row["account"], row["update_id"]): row
+                        for row in read_jsonl(raw_path)
+                        if "update_id" in row
+                    }
+                    if raw_path.exists()
+                    else {}
+                )
+            saved = saved_days[day].get((account, update.update_id))
+            if saved is not None:
+                expected = {
+                    "source": "telegram",
+                    "account": account,
+                    "update_type": update.update_type,
+                    "update_id": update.update_id,
+                    "received_at": update.received_at,
+                    "payload": update.payload,
+                }
+                if any(saved.get(key) != value for key, value in expected.items()):
+                    raise ValueError(f"Conflicting Telegram raw update {update.update_id}")
+
+        if saved is None:
+            result = append_telegram_update(
+                paths,
+                account=account,
+                payload=update.payload,
+                update_type=update.update_type,
+                update_id=update.update_id,
+                received_at=update.received_at,
+                capture_mode=capture_mode,
+            )
+        else:
+            day = local_date_for_timestamp(saved["received_at"])
+            raw_dir, raw_path = raw_capture_paths(paths, day)
+            with raw_path.open("rb") as handle:
+                os.fsync(handle.fileno())
+            result = TelegramCaptureResult(
+                date=day,
+                raw_dir=raw_dir,
+                updates_path=raw_path,
+                cursor=set_connector_cursor(
+                    paths,
+                    source="telegram",
+                    account=account,
+                    cursor_key=TELEGRAM_CURSOR_KEY,
+                    cursor_value=str(update.update_id),
+                    updated_at=update.received_at,
+                ),
+            )
+        if update.receipt_id is not None:
+            client.acknowledge_update(update.receipt_id)
         if result.date not in dates_written:
             dates_written.append(result.date)
         if update.update_id is not None:
