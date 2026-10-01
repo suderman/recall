@@ -46,6 +46,11 @@ def test_late_arrival_exact_dedupe_and_cached_resume(tmp_path, monkeypatch):
     assert rows[0]["raw_ref"]["path"] == str(raw)
     assert [job["status"] for job in jobs] == ["success", "missing", "captured-empty"]
     assert jobs[0]["capture_day_present"] is False
+    assert len({job["input_manifest"] for job in jobs}) == 1
+    snapshot = read_jsonl(output.root / jobs[0]["input_manifest"])[0]
+    assert snapshot["input_hashes"] == {str(raw): replay.file_hash(raw)}
+    assert snapshot["fingerprint"] == jobs[0]["fingerprint"]
+    assert all("input_hashes" not in job for job in jobs)
     before = output.normalized_event_path("2026-03-31").read_bytes()
 
     def unexpected(*args, **kwargs):
