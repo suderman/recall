@@ -191,13 +191,6 @@ def should_expand_thread(message: dict[str, Any]) -> bool:
     return bool(message.get("reply_count") and message.get("ts"))
 
 
-def should_keep_message(message: dict[str, Any]) -> bool:
-    text = str(message.get("text") or "").strip()
-    if not text:
-        return False
-    return "<!date^" not in text
-
-
 def ts_sort_key(value: str | None) -> Decimal:
     try:
         return Decimal(str(value or "0"))
@@ -233,15 +226,21 @@ def raw_capture_paths(paths: RecallPaths, date: str) -> tuple[Path, Path, Path, 
 
 
 def read_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid Slack JSON at {path}:{exc.lineno}") from exc
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as handle:
-        for line in handle:
+        for number, line in enumerate(handle, 1):
             if line.strip():
-                rows.append(json.loads(line))
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"Invalid Slack JSONL at {path}:{number}") from exc
     return rows
 
 
@@ -294,16 +293,10 @@ def collect_slack_window(
             continue
 
         stats["checked"] += 1
-        history = [
-            message
-            for message in client.fetch_history(
-                conversation["id"],
-                oldest=oldest,
-                latest=latest,
-                inclusive=inclusive,
-            )
-            if should_keep_message(message)
-        ]
+        # Preserve raw messages, including attachment-only and scheduled details.
+        history = client.fetch_history(
+            conversation["id"], oldest=oldest, latest=latest, inclusive=inclusive
+        )
 
         if not history:
             continue
@@ -347,7 +340,7 @@ def collect_slack_window(
                 thread_rows = [
                     reply
                     for reply in client.fetch_replies(conversation["id"], ts=str(message["ts"]))
-                    if reply.get("ts") != message.get("ts") and should_keep_message(reply)
+                    if reply.get("ts") != message.get("ts")
                 ]
                 thread_rows.sort(key=lambda reply: ts_sort_key(reply.get("ts")))
 

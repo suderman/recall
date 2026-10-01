@@ -11,6 +11,7 @@ from recall.cli.artifacts import (
     download_telegram_artifact_bytes,
     show_artifacts,
 )
+from recall.cli.backfill import slack as backfill_slack
 from recall.cli.entities import (
     run_entity_matching,
     show_identities,
@@ -72,6 +73,7 @@ from recall.storage.paths import RecallPaths
 
 app = typer.Typer(help="Recall command-line interface.", no_args_is_help=True)
 capture_app = typer.Typer(help="Capture raw evidence from source systems.")
+backfill_app = typer.Typer(help="Capture bounded historical evidence into separate workspaces.")
 normalize_app = typer.Typer(help="Normalize captured evidence into daily events.")
 events_app = typer.Typer(help="Inspect normalized events.")
 timeline_app = typer.Typer(help="Build deterministic Org evidence timelines.")
@@ -90,6 +92,8 @@ import_app = typer.Typer(help="Import historical export bundles.")
 export_app = typer.Typer(help="Export source-native history bundles.")
 
 app.add_typer(capture_app, name="capture")
+app.add_typer(backfill_app, name="backfill")
+backfill_app.command("slack")(backfill_slack)
 app.add_typer(normalize_app, name="normalize")
 app.add_typer(events_app, name="events")
 app.add_typer(timeline_app, name="timeline")

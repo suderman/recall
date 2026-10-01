@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
 from typing import Any
@@ -17,7 +18,11 @@ class SlackApiClient:
         timeout: float = 30.0,
         sleep_fn: Callable[[float], None] = time.sleep,
         client: httpx.Client | None = None,
+        max_rate_limit_retries: int = 5,
     ) -> None:
+        if max_rate_limit_retries < 0:
+            raise ValueError("Rate-limit retries must not be negative")
+        self._max_rate_limit_retries = max_rate_limit_retries
         self._token = token
         self._sleep = sleep_fn
         self._client = client or httpx.Client(base_url=SLACK_API_BASE_URL, timeout=timeout)
@@ -38,6 +43,7 @@ class SlackApiClient:
             key: value for key, value in (params or {}).items() if value is not None and value != ""
         }
 
+        retries = 0
         while True:
             response = self._client.get(
                 method,
@@ -46,14 +52,25 @@ class SlackApiClient:
             )
 
             if response.status_code == 429:
+                if retries >= self._max_rate_limit_retries:
+                    raise RuntimeError(f"{method}: Slack rate-limit retry budget exhausted")
                 retry_after = float(response.headers.get("retry-after", "30"))
+                if not math.isfinite(retry_after) or retry_after < 0:
+                    raise ValueError("Invalid Slack Retry-After header")
                 self._sleep(retry_after)
+                retries += 1
                 continue
 
             response.raise_for_status()
             payload = response.json()
             if not payload.get("ok"):
                 raise RuntimeError(f"{method} failed: {payload.get('error', 'unknown_error')}")
+            if payload.get("is_limited"):
+                raise RuntimeError(f"{method}: Slack reports limited history")
+            if payload.get("has_more") and not payload.get("response_metadata", {}).get(
+                "next_cursor"
+            ):
+                raise RuntimeError(f"{method}: more results reported without a pagination cursor")
             return payload
 
     def auth_test(self) -> dict[str, Any]:

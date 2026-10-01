@@ -180,7 +180,8 @@ Keep this section current as implementation advances.
 - [ ] Broader Telegram validation with real-world forwards, service messages, channels, and large media/documents
 - [ ] Telegram artifact coverage validation for real animation/video-note/sticker downloads
 - [x] Isolated local date-range rebuild with scoped replacement, coverage, and resume checkpoints
-- [ ] Remote date-range capture and backfill orchestration across connectors
+- [x] Isolated Slack date-range backfill with hash-checked daily bundles and bounded rate-limit retries
+- [ ] Real-workspace Slack backfill validation and remote orchestration across other connectors
 - [ ] Deduplication logic across overlapping sources and imports
 - [x] Deterministic cited daily Org evidence timelines with annotation protection
 - [x] Hash-checked journal evidence/prompt packets and cited model-draft revision storage

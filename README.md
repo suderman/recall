@@ -114,6 +114,7 @@ data/
   derived/journals/<year>/<date>/<revision-hash>/journal.org
   state/recall.sqlite3
   state/rebuild/
+  state/backfill/slack.jsonl
 tests/
 examples/
 ```
@@ -267,7 +268,7 @@ Recall isn't:
 - validate journal generation on more dates before nightly scheduling
 - review generated journals for relevance and factual claims
 - validate Telegram edge cases and artifact downloads
-- add bounded remote backfill using the existing local replay contract
+- validate bounded Slack backfill on a real workspace and extend other remote connectors
 - assess conservative overlap deduplication without losing provenance
 
 ## Development
@@ -459,6 +460,51 @@ recall state show bluebubbles
 recall state show slack
 recall events show --date 2026-03-31
 ```
+
+## Capture bounded Slack history
+
+Choose the account label and date range before making a remote pull. The token
+selects the Slack workspace; `--account` only labels the stored evidence. Source
+settings and `.env` come from `--root`, with existing environment variables taking
+precedence. Capture into a separate, non-overlapping output workspace:
+
+```bash
+nix develop -c recall backfill slack \
+  --root "$PWD" --output-root "$HOME/recall-slack-raw" --account work \
+  --from 2026-03-27 --to 2026-04-02 --timezone America/Edmonton
+
+nix develop -c recall rebuild \
+  --root "$HOME/recall-slack-raw" --output-root "$HOME/recall-slack-replay" \
+  --from 2026-03-27 --to 2026-04-02 --timezone America/Edmonton \
+  --source slack --account work
+```
+
+Dates are inclusive local days, including DST changes. Backfill preserves raw
+attachment-only messages and scheduled details, without choosing journal content.
+It filters stored timestamps to the requested day. Threads are expanded from
+parents returned by that day's history query, so replies to older parents may
+be missing. Archived conversations are excluded unless configured or selected
+with `--include-archived`. Deleted messages, retention limits, and conversations
+the token cannot access remain gaps. `captured` and `queried-empty` describe API
+results, not complete life coverage.
+
+Each completed daily directory has `metadata.json`, `conversations.json`,
+`messages.jsonl`, and a hash checkpoint, `backfill.json`. The whole directory
+publishes at once. Rerun the same command after failure or interruption; verified
+days reuse their bytes without API calls. Changed, unowned, or conflicting
+captures are refused, never replaced. Use a new output root for changed capture
+options or a fresh pull. A writer lock prevents concurrent backfills there.
+
+`data/state/backfill/slack.jsonl` records daily results and collection counts.
+The command stops at the first failed day and exits nonzero; later days remain
+unattempted until rerun. HTTP 429 retries respect `Retry-After`, with at most five
+retries per request. Limited-history responses and missing pagination cursors
+fail explicitly instead of claiming a complete page set.
+
+Backfill does not alter source data, live cursors, entity resolutions, normalized
+evidence, search indexes, or services. Review the separate replay, then include
+it when rebuilding the search index. No cross-source fuzzy deduplication is added;
+replayed Slack events retain their existing account/channel/timestamp IDs.
 
 ## Rebuild a week and inspect evidence
 
@@ -721,5 +767,6 @@ commands in the user's agent workflow.
 Sol medium is the journal default after passing two real-data weeks. A first-quarter
 local replay also verified long-range checkpoints and expanded historical search.
 Validation still fails closed and retains rejected drafts. Broader journal
-validation, nightly scheduling, remote range backfill, broad Telegram validation,
-fuzzy overlap matching, and worklogs remain unfinished.
+validation, nightly scheduling, real-workspace Slack backfill validation, other
+remote range connectors, broad Telegram validation, fuzzy overlap matching, and
+worklogs remain unfinished.
