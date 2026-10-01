@@ -207,8 +207,11 @@ def save_journal(
         or any(ord(char) < 32 and char not in "\n\t" for char in body)
     ):
         raise ValueError("Journal body must be plain Org prose, headings, and citation markers")
-    cited = list(dict.fromkeys(re.findall(r"\[fn:([A-Za-z0-9_-]+)\]", body)))
-    if not cited or body.count("[fn:") != len(re.findall(r"\[fn:[A-Za-z0-9_-]+\]", body)):
+    citation_body = re.sub(r"\[=fn:([A-Za-z0-9_-]+)=\]", r"[fn:\1]", body)
+    cited = list(dict.fromkeys(re.findall(r"\[fn:([A-Za-z0-9_-]+)\]", citation_body)))
+    if not cited or citation_body.count("[fn:") != len(
+        re.findall(r"\[fn:[A-Za-z0-9_-]+\]", citation_body)
+    ):
         raise ValueError("Journal body needs valid event citation markers")
     indexed = {row["event_id"]: (number, row) for number, row in enumerate(events, 1)}
     unknown = sorted(set(cited) - indexed.keys())
@@ -222,7 +225,7 @@ def save_journal(
             citation_groups.append(group)
         return f"[fn:{citation_groups.index(group) + 1}]"
 
-    prose = re.sub(r"([=~])(\[fn:[A-Za-z0-9_-]+\])\1", r"\2", body.strip())
+    prose = re.sub(r"([=~])(\[fn:[A-Za-z0-9_-]+\])\1", r"\2", citation_body.strip())
     prose = re.sub(
         r"\[fn:[A-Za-z0-9_-]+\](?:[ \t]*\[fn:[A-Za-z0-9_-]+\])*",
         numbered_citation,
