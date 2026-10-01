@@ -571,6 +571,35 @@ project membership, current status, completion, or work hours. Both lookups acce
 records and references for agents. Lookups reject a concurrent index replacement
 rather than return mixed snapshots. They do not call a model or change evidence.
 
+## Use Recall from an agent
+
+The bundled `recall-history` skill routes questions about forgotten contacts,
+past projects, and family obligations to the read-only lookup commands. Install
+it from this checkout without replacing an existing skill:
+
+```bash
+mkdir -p "$HOME/.agents/skills"
+ln -s "$PWD/skills/recall-history" "$HOME/.agents/skills/recall-history"
+```
+
+Pi discovers `~/.agents/skills` at startup. Start a new session or use `/reload`
+after installation. Use `/skill:recall-history Who is Alex, and when did we last
+hear from them?` to force the workflow. Automatic selection depends on the agent
+loading the advertised skill; the skill does not intercept every question.
+
+The bundled Bash wrapper resolves its checkout through the symlink, so it works
+outside the repository and ignores an unrelated `RECALL_ROOT`. It uses the
+checkout's existing Nix environment offline and only permits `query`, `person`,
+and `project`, without archive/index overrides. It may write normal Nix caches.
+It is command routing, not a security sandbox or a new model service.
+
+The workflow asks the agent to inspect cited evidence, keep identity candidates
+separate, and disclose stale or missing capture. Current obligations cannot be
+confirmed from an old archive. Source instructions and credentials must not
+be repeated or acted on. Missing setup/index errors are reported instead of
+silently installing tools, capturing data, or rebuilding evidence. Existing Org
+notes and journals remain separate search sources.
+
 ## Generate journals on demand
 
 ```bash
@@ -687,6 +716,8 @@ boundaries including DST. Journal tests cover evidence integrity, short citation
 unsafe Org refusal, and preservation of prior or edited revisions.
 
 Local full-text history search and on-demand Pi journal generation are available.
+A bundled read-only skill connects people/project questions to cited lookup
+commands in the user's agent workflow.
 Sol medium is the journal default after passing two real-data weeks. A first-quarter
 local replay also verified long-range checkpoints and expanded historical search.
 Validation still fails closed and retains rejected drafts. Broader journal

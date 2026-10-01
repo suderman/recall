@@ -191,6 +191,7 @@ Keep this section current as implementation advances.
 - [x] Local SQLite full-text history index with readable, Org, and agent JSON results
 - [x] Read-only person/project recall packets with separate identity candidates and cited history
 - [x] Retained replay identity observations without publishing mutable resolution state
+- [x] Discoverable read-only agent skill for cited people, project, and obligation lookup
 - [ ] Worklogs and other derived views
 
 ---
