@@ -30,7 +30,7 @@ def test_resume_regeneration_and_manual_edits(tmp_path: Path, monkeypatch) -> No
     assert generate.build_journals(paths, **kwargs)[0]["status"] == "cached"
     assert len(calls) == 1 and target.read_bytes() == old
     assert "evt_mail" in calls[0][0] and "evt_break" in calls[0][0]
-    assert calls[0][1] == "codex-lb/gpt-6-luna:high"
+    assert calls[0][1] == "codex-lb/gpt-6.1-sol:medium"
     assert generate.build_journals(paths, regenerate=True, **kwargs)[0]["status"] == "generated"
     assert target.read_bytes() != old
     assert len(list((paths.derived / "journals/2026" / DAY).glob("*/journal.org"))) == 2
@@ -107,7 +107,7 @@ def test_changed_evidence_regenerates_and_busy_writer(tmp_path: Path, monkeypatc
 @pytest.mark.parametrize("fault", ["error", "length", "wrong_model", "tools", "truncated", "json"])
 def test_pi_protocol_rejects_failed_or_wrong_routes(tmp_path: Path, monkeypatch, fault) -> None:
     message: dict[str, Any] = {
-        "role": "assistant", "provider": "codex-lb", "model": "gpt-6-luna",
+        "role": "assistant", "provider": "codex-lb", "model": "gpt-6.1-sol",
         "stopReason": "stop", "content": [{"type": "text", "text": "Prepared.[fn:evt_mail]"}],
     }
     stream: list[dict[str, Any]] = [
@@ -129,7 +129,7 @@ def test_pi_protocol_rejects_failed_or_wrong_routes(tmp_path: Path, monkeypatch,
         assert "--no-tools" in args and "--no-extensions" in args
         assert "--no-context-files" in args and "--no-session" in args
         assert args[args.index("--provider") + 1] == "codex-lb"
-        assert args[args.index("--thinking") + 1] == "high"
+        assert args[args.index("--thinking") + 1] == "medium"
         assert kwargs["input"] == "evidence"
         assert Path(kwargs["cwd"]).is_dir()
         return subprocess.CompletedProcess(args, 0, stdout, "")

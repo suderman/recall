@@ -264,7 +264,7 @@ Recall isn't:
 
 ## Near-term goals
 
-- improve Luna's citation reliability before unattended journal generation
+- validate journal generation on more dates before nightly scheduling
 - review generated journals for relevance and factual claims
 - validate Telegram edge cases and artifact downloads
 - add bounded remote backfill using the existing local replay contract
@@ -547,23 +547,26 @@ into this evidence index. There is no web UI or natural-language search service.
 nix develop -c recall journal build \
   --root "$HOME/recall-week" --from 2026-03-27 --to 2026-04-02 \
   --author "Your name" --output "$HOME/org/journal" \
-  --timezone America/Edmonton --model codex-lb/gpt-6-luna:high
+  --timezone America/Edmonton --model codex-lb/gpt-6.1-sol:medium
 ```
 
 This uses the configured Pi provider route with tools, extensions, skills,
 project context, and session persistence disabled. Only the journal instructions
 and evidence packet enter the request. Remote transmission requires the user's
-approval. The default route is `codex-lb/gpt-6-luna:high`.
+approval. The default route is `codex-lb/gpt-6.1-sol:medium`.
 
 Entries publish under `~/org/journal/YYYY/MM/YYYY-MM-DD.org`. Completed days are
 checkpointed; unchanged inputs/options reuse saved responses. `--regenerate`
 requests new model output. Old revisions remain intact, and handwritten or
 edited visible entries are never overwritten. No nightly service is installed.
 
-Luna sometimes invents citation IDs or returns malformed markers. Invalid drafts
-are rejected, previous entries remain intact, and the error points to a retained
-plain-text draft under `data/derived/journal-failures/`. Do not rely on unattended
-generation yet. Citation membership is not a truth check; review the prose too.
+Luna returned invented citation IDs and malformed markers in real tests. Sol
+medium passed the same seven-day range and a second generation of a previously
+failing day without changing the prompts or validation. This is a limited test,
+not a guarantee. Invalid drafts are rejected, previous entries remain intact,
+and the error points to a retained plain-text draft under
+`data/derived/journal-failures/`. Citation membership is not a truth check; review
+the prose too.
 The selection policy favors people and milestones over routine account notices.
 
 ## Prepare and save a readable journal
@@ -654,7 +657,7 @@ boundaries including DST. Journal tests cover evidence integrity, short citation
 unsafe Org refusal, and preservation of prior or edited revisions.
 
 Local full-text history search and on-demand Pi journal generation are available.
-Real Luna runs exposed unreliable citation formatting and invented IDs; validation
-fails closed and retains rejected drafts. Reliable unattended generation, remote
-range backfill, broad Telegram validation, fuzzy overlap matching, and worklogs
-remain unfinished.
+Sol medium is the journal default after passing the selected real-data week.
+Validation still fails closed and retains rejected drafts. Broader journal
+validation, nightly scheduling, remote range backfill, broad Telegram validation,
+fuzzy overlap matching, and worklogs remain unfinished.
