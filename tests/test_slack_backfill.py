@@ -80,8 +80,9 @@ def fingerprint(path: Path) -> dict[str, str]:
     }
 
 
+# Use past transitions; future timezone rules can change.
 @pytest.mark.parametrize(
-    "day,duration", [("2026-03-08", "82799.999999"), ("2026-11-01", "89999.999999")]
+    "day,duration", [("2025-03-09", "82799.999999"), ("2025-11-02", "89999.999999")]
 )
 def test_backfill_preserves_raw_message_shapes_exact_bounds_and_cached_bytes(
     tmp_path: Path,

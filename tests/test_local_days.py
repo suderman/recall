@@ -8,7 +8,8 @@ from recall.connectors.email.notmuch import build_notmuch_query, load_email_mess
 from recall.normalize.time import day_bounds
 
 
-@pytest.mark.parametrize("day,hours", [("2026-03-08", 23), ("2026-11-01", 25)])
+# Use past transitions; future timezone rules can change.
+@pytest.mark.parametrize("day,hours", [("2025-03-09", 23), ("2025-11-02", 25)])
 def test_email_query_uses_exact_local_day_across_dst(day, hours):
     start, end = day_bounds(day, "America/Edmonton")
     assert end.timestamp() - start.timestamp() == hours * 3600
