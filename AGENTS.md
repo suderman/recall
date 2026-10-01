@@ -189,6 +189,8 @@ Keep this section current as implementation advances.
 - [x] First-quarter local replay and historical search validation with compact provenance
 - [ ] Broader journal validation and nightly scheduling
 - [x] Local SQLite full-text history index with readable, Org, and agent JSON results
+- [x] Read-only person/project recall packets with separate identity candidates and cited history
+- [x] Retained replay identity observations without publishing mutable resolution state
 - [ ] Worklogs and other derived views
 
 ---

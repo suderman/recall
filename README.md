@@ -545,6 +545,32 @@ The index lives under `data/derived/`; it is not the primary event store. Org
 notes and journal text can still be searched in Emacs. They are not imported
 into this evidence index. There is no web UI or natural-language search service.
 
+## Recall person or project context
+
+```bash
+nix develop -c recall search person "Alex" --json
+nix develop -c recall search person --identity ident_email_alex_example_com --org
+nix develop -c recall search project "Client project" --from 2026-01-01 --json
+```
+
+Person lookup matches words in observed identity names or addresses. It keeps
+identities separate, returns first/latest captured evidence and bounded recent
+history, and reports ambiguous names. Broad names show at most 20 candidates;
+choose `--identity` to inspect one. A name found only in message text is returned
+as an unlinked mention, never used to identify the sender or participant.
+
+Replay retains labels for published identities under
+`data/state/rebuild/identity-labels.jsonl`. The search index combines these with
+read-only entity storage. It does not publish temporary resolution state or
+merge people. Labels may describe reused addresses; inspect event-time evidence.
+Earlier replay outputs need a refresh before their names enter the index.
+
+Project lookup matches all supplied words in indexed evidence. It does not infer
+project membership, current status, completion, or work hours. Both lookups accept
+`--from`, `--to`, `--source`, `--limit`, `--org`, and `--json`. JSON carries complete
+records and references for agents. Lookups reject a concurrent index replacement
+rather than return mixed snapshots. They do not call a model or change evidence.
+
 ## Generate journals on demand
 
 ```bash
