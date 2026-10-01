@@ -181,10 +181,11 @@ Keep this section current as implementation advances.
 - [ ] Telegram artifact coverage validation for real animation/video-note/sticker downloads
 - [x] Isolated local date-range rebuild with scoped replacement, coverage, and resume checkpoints
 - [x] Isolated Slack date-range backfill with hash-checked daily bundles and bounded rate-limit retries
-- [ ] Real-workspace Slack backfill validation and remote orchestration across other connectors
+- [x] Real-workspace Slack backfill validation with isolated replay and cited search integration
+- [ ] Remote orchestration across other connectors
 - [ ] Deduplication logic across overlapping sources and imports
 - [x] Deterministic cited daily Org evidence timelines with annotation protection
-- [x] Hash-checked journal evidence/prompt packets and cited model-draft revision storage
+- [x] Hash-checked journal evidence/prompt packets with explicit accepted replay overlays and cited model-draft revision storage
 - [x] On-demand Pi journal runner with checkpointing, revisions, and publication protection
 - [x] Sol medium validation across two real-data weeks with preserved citations
 - [x] First-quarter local replay and historical search validation with compact provenance

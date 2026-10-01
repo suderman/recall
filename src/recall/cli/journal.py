@@ -22,6 +22,7 @@ def build(
     model: str = typer.Option(DEFAULT_MODEL, "--model"),
     regenerate: bool = typer.Option(False, "--regenerate"),
     root: Path | None = typer.Option(None, "--root"),
+    include_root: list[Path] | None = typer.Option(None, "--include-root"),
 ) -> None:
     """Generate cited journals through Pi; resume cached days and protect manual edits."""
     try:
@@ -34,6 +35,7 @@ def build(
             timezone_name=timezone_name,
             model=model,
             regenerate=regenerate,
+            include_roots=[RecallPaths.from_root(path) for path in include_root or []],
         )
     except (ValueError, OSError, ZoneInfoNotFoundError, subprocess.TimeoutExpired) as exc:
         typer.echo(str(exc), err=True)
@@ -47,6 +49,7 @@ def prepare(
     author: str = typer.Option(..., "--author"),
     timezone_name: str = typer.Option("UTC", "--timezone"),
     root: Path | None = typer.Option(None, "--root"),
+    include_root: list[Path] | None = typer.Option(None, "--include-root"),
 ) -> None:
     """Snapshot evidence and instructions locally. Does not call an LLM."""
     try:
@@ -55,6 +58,7 @@ def prepare(
             day=day,
             author=author,
             timezone_name=timezone_name,
+            include_roots=[RecallPaths.from_root(path) for path in include_root or []],
         )
     except (ValueError, OSError, ZoneInfoNotFoundError) as exc:
         typer.echo(str(exc), err=True)

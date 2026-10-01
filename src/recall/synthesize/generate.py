@@ -123,6 +123,7 @@ def build_journals(
     timezone_name: str = "America/Edmonton",
     model: str = DEFAULT_MODEL,
     regenerate: bool = False,
+    include_roots: list[RecallPaths] | None = None,
 ) -> list[dict[str, Any]]:
     """Resume completed days; regenerate explicitly or when evidence/options change."""
     days = date_range(first, last)
@@ -142,7 +143,13 @@ def build_journals(
             key = str(target)
 
             _check_target(target, owned, jobs)
-            packet_dir = prepare_journal(paths, day=day, author=author, timezone_name=timezone_name)
+            packet_dir = prepare_journal(
+                paths,
+                day=day,
+                author=author,
+                timezone_name=timezone_name,
+                include_roots=include_roots,
+            )
             _load_packet(packet_dir)
             prompt = (
                 (packet_dir / "prompt.org").read_text()

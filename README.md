@@ -689,6 +689,30 @@ and hash-checked input/coverage metadata in `packet.json`. Preparation keeps eve
 normalized event, including routine alerts that the journal may omit. It does
 not call a model or download anything. Keep these private files out of Git.
 
+Both `journal prepare` and `journal build` accept repeatable `--include-root`
+options for accepted normalized replays:
+
+```bash
+packet="$(nix develop -c recall journal prepare \
+  --root "$HOME/recall-week" --include-root "$HOME/recall-slack-replay" \
+  --date 2026-03-30 --author "Your name" --timezone America/Edmonton)"
+```
+
+Inputs follow command-line order. Later roots win only for identical event IDs;
+missing daily files and empty replays do not remove earlier evidence. Repeated
+IDs within one input file, invalid evidence, mismatched timezones, and active
+replay writers stop preparation. Each root must have a normalized directory.
+Included roots are read-only; packets and runner state stay in the primary root.
+
+Multi-root packets record source-file and coverage hashes plus the winning
+physical file/line for each event. Raw links resolve relative to that event's
+root. Coverage follows source/account scope, so a work-account pull cannot certify
+personal-account evidence. New evidence without matching coverage stays
+unverified. An empty query conflicting with retained evidence reports partial
+coverage rather than silently deleting events. This is an exact-ID overlay, not
+fuzzy deduplication or canonical-store replacement. Changed replay inputs change
+the packet identity and invalidate the runner cache.
+
 Use the packet with an approved model to draft readable prose. The prompt asks
 for a first-person account, related messages combined into conversations, and
 unresolved commitments worth carrying forward. It treats source text as evidence,
