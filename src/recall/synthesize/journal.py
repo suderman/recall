@@ -210,8 +210,9 @@ def save_journal(
     if not cited or body.count("[fn:") != len(re.findall(r"\[fn:[A-Za-z0-9_-]+\]", body)):
         raise ValueError("Journal body needs valid event citation markers")
     indexed = {row["event_id"]: (number, row) for number, row in enumerate(events, 1)}
-    if set(cited) - indexed.keys():
-        raise ValueError("Journal cites events outside its evidence packet")
+    unknown = sorted(set(cited) - indexed.keys())
+    if unknown:
+        raise ValueError("Journal cites events outside its evidence packet: " + ", ".join(unknown))
     citation_groups: list[tuple[str, ...]] = []
 
     def numbered_citation(match: re.Match[str]) -> str:

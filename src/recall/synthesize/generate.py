@@ -12,7 +12,7 @@ from typing import Any
 from recall.normalize.rebuild import date_range
 from recall.storage.jsonl import read_jsonl, write_jsonl, write_text_atomic
 from recall.storage.paths import RecallPaths
-from recall.synthesize.journal import _load_packet, _sha, prepare_journal, save_journal
+from recall.synthesize.journal import _load_packet, _sha, _write_once, prepare_journal, save_journal
 
 DEFAULT_MODEL = "codex-lb/gpt-6-luna:high"
 SYSTEM_PROMPT = (
@@ -140,10 +140,22 @@ def build_journals(
                 body, options = run_pi(prompt, model)
                 options.update(prompt_sha256=_sha(prompt), system_sha256=_sha(SYSTEM_PROMPT))
             # Re-render cached bodies too; citation/layout fixes need no new model call.
-            revision = save_journal(
-                paths, packet_dir=packet_dir, body=body, model=model,
-                generation_options=options,
-            )
+            try:
+                revision = save_journal(
+                    paths, packet_dir=packet_dir, body=body, model=model,
+                    generation_options=options,
+                )
+            except ValueError as exc:
+                if cached:
+                    raise
+                record = json.dumps({
+                    "packet": str(packet_dir), "model": model, "options": options,
+                    "error": str(exc), "body_sha256": _sha(body),
+                }, sort_keys=True) + "\n"
+                failure = paths.derived / "journal-failures" / day / _sha(record)
+                _write_once(failure / "body.txt", body)
+                _write_once(failure / "generation.json", record)
+                raise ValueError(f"{exc}; rejected draft: {failure / 'body.txt'}") from exc
             jobs[key] = {
                 "date": day, "path": key, "fingerprint": fingerprint,
                 "packet": str(packet_dir), "model": model, "revision": str(revision),

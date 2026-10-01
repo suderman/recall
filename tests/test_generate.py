@@ -72,6 +72,9 @@ def test_interruption_and_publication_crash_resume(tmp_path: Path, monkeypatch) 
     with pytest.raises(ValueError, match="outside its evidence"):
         generate.build_journals(paths, regenerate=True, **kwargs)
     assert (output / "2026/03/2026-03-30.org").read_bytes() == previous
+    rejected = list((paths.derived / "journal-failures" / DAY).glob("*/body.txt"))
+    assert len(rejected) == 1 and rejected[0].read_text() == "Unsupported.[fn:unknown]"
+    assert "unknown" in json.loads((rejected[0].parent / "generation.json").read_text())["error"]
 
 
 def test_changed_evidence_regenerates_and_busy_writer(tmp_path: Path, monkeypatch) -> None:
