@@ -97,6 +97,24 @@ The first entity subsystem to build is **people + identities**.
 
 ---
 
+## Workspace boundaries
+
+Keep planning, task state, handoffs and readable notes in
+`~/org/work/suderman/recall/recall.org` and its note directories.
+Use this repository's gitignored `.scratch/` directory for generated captures,
+isolated replay workspaces, fixtures, audit scripts, logs and manifests.
+Keep private scratch directories owner-only. Do not put new runtime data under
+`~/org/work/`, and do not treat scratch copies as canonical `data/`.
+
+Relocated audit archives retain their original bytes and recorded paths. Use
+the relocation manifest when resolving old references. Start new audit scripts
+and protection baselines with current paths; do not rerun archived scripts
+without reviewing their old absolute paths. Regenerated replay output may differ
+in absolute provenance paths. Use the relocation map to compare those paths
+without rewriting archived records. Keep planning out of `.scratch/`.
+
+---
+
 ## Current known sources
 
 These are current known sources and how they should fit.
