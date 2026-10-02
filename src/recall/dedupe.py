@@ -6,6 +6,7 @@ import hashlib
 import json
 from typing import Any
 
+from recall.connectors.telegram.normalize import _event_id as telegram_event_id
 from recall.storage.paths import RecallPaths
 
 RAW_FILES = {"bluebubbles": "events.jsonl", "telegram": "updates.jsonl"}
@@ -103,6 +104,12 @@ def inspect_overlaps(
                         continue
                     key = (source, selected_account, namespace, conversation_id, message_id)
                     groups.setdefault(key, []).append(observation)
+    telegram_keys: dict[tuple[str, str, str], dict[str, list[dict[str, Any]]]] = {}
+    for (source, selected_account, namespace, conversation_id, message_id), rows in groups.items():
+        if source == "telegram":
+            telegram_keys.setdefault((selected_account, conversation_id, message_id), {})[
+                namespace
+            ] = rows
     return {
         "read_only": True,
         "sources": sorted(sources),
@@ -131,8 +138,29 @@ def inspect_overlaps(
             for key, rows in sorted(groups.items())
             if len(rows) > 1
         ],
+        "normalization_collisions": [
+            {
+                "reason": "telegram_namespace_not_in_event_id",
+                "event_id": telegram_event_id(*key),
+                "key": {
+                    "source": "telegram",
+                    **dict(zip(("account", "conversation_id", "message_id"), key, strict=True)),
+                },
+                "payload_variants": len(
+                    {row["payload_sha256"] for rows in namespaces.values() for row in rows}
+                ),
+                "namespaces": [
+                    {"namespace": namespace, "observations": rows}
+                    for namespace, rows in sorted(namespaces.items())
+                ],
+            }
+            for key, namespaces in sorted(telegram_keys.items())
+            if len(namespaces) > 1
+        ],
         "limitations": [
             "No records are joined or rewritten; differing payloads remain observations.",
+            "Telegram audit namespaces do not isolate current normalized event IDs.",
+            "Normalization collisions warn of shared IDs, not proved message equivalence.",
             "Telegram exports are grouped only within one import bundle, not with TDLib.",
             "Export keys may be synthesized by the importer, not original source IDs.",
             "No text matching, inferred IDs, or cross-source matching is performed.",

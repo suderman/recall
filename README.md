@@ -548,6 +548,13 @@ matching native message IDs. The command does not match exports to TDLib, match
 across sources, rewrite normalized events, or create a database. Normalized
 upsert still keeps one selected raw reference per event, not a join ledger.
 
+The `normalization_collisions` list warns when different Telegram audit namespaces
+share a current normalized event ID. It includes the event ID and every observation
+under each namespace. Audit namespace separation does not protect normalized
+storage: current Telegram event IDs omit the import bundle, so normalization can
+replace one namespace's record with another. These warnings do not prove that the
+messages are equivalent. The command does not change IDs or prevent replacement.
+
 Isolated rebuilds process capture days in sorted order and records in physical
 line order. For one event ID on one output day, the last processed observation
 wins. This is replay order, not a comparison of source edit timestamps. Rebuild

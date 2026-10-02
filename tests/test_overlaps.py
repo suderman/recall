@@ -10,9 +10,11 @@ from typer.testing import CliRunner
 from recall.cli.main import app
 from recall.connectors.bluebubbles.capture import append_bluebubbles_event
 from recall.connectors.bluebubbles.importer import import_bluebubbles_export
+from recall.connectors.telegram.capture import append_telegram_update
 from recall.connectors.telegram.importer import import_telegram_export
+from recall.connectors.telegram.normalize import normalize_telegram_day
 from recall.dedupe import inspect_overlaps
-from recall.storage.jsonl import write_jsonl
+from recall.storage.jsonl import read_jsonl, write_jsonl
 from recall.storage.paths import RecallPaths
 
 runner = CliRunner()
@@ -59,6 +61,7 @@ def test_overlaps_reports_bluebubbles_live_import_observations_without_writes(tm
     assert report["read_only"] is True
     assert report["records_scanned"] == 2
     assert report["message_observations"] == 2
+    assert report["normalization_collisions"] == []
     assert len(report["groups"]) == 1
     group = report["groups"][0]
     assert group["reason"] == "same_source_message_id"
@@ -158,9 +161,15 @@ def test_overlaps_keeps_telegram_exports_accounts_and_conversations_separate(tmp
         "same_import_message_key",
     }
     assert report["unidentified_messages"][0]["reason"] == "missing_import_id"
+    collision = report["normalization_collisions"][0]
+    assert len(report["normalization_collisions"]) == 1
+    assert collision["payload_variants"] == 1  # Equal text does not prove namespace equivalence.
+    assert len(collision["namespaces"]) == 3
+    assert sum(len(n["observations"]) for n in collision["namespaces"]) == 5
     work = inspect_overlaps(paths, sources=["telegram"], account="work")
     assert work["records_scanned"] == 1 and work["message_observations"] == 1
     assert work["groups"] == [] and work["unidentified_messages"] == []
+    assert work["normalization_collisions"] == []
 
 
 @pytest.mark.parametrize("message_id", [None, 0, "0", True, False, ""])
@@ -173,6 +182,7 @@ def test_overlaps_does_not_infer_missing_message_ids_from_text(tmp_path, message
     report = inspect_overlaps(paths, sources=["telegram"])
 
     assert report["groups"] == []
+    assert report["normalization_collisions"] == []
     assert len(report["unidentified_messages"]) == 2
     assert all(r["reason"] == "missing_source_message_key" for r in report["unidentified_messages"])
 
@@ -264,3 +274,126 @@ def test_overlaps_marks_actual_telegram_synthesized_import_keys_as_candidates(tm
     assert group["reason"] == "same_import_message_key"
     assert group["key"]["namespace"] == f"export:{imported.import_id}"
     assert snapshot(tmp_path) == before
+
+
+def test_overlaps_warns_when_telegram_import_namespaces_share_normalized_id(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path / "archive")
+    native = telegram_row()["payload"]
+    native["message"]["id"] = 1048576
+    native["message"]["date"] = 1774990800
+    append_telegram_update(
+        paths,
+        account="personal",
+        payload=native,
+        update_type="updateNewMessage",
+        capture_mode="stream",
+        received_at="2026-03-31T21:00:00Z",
+    )
+    expected_lines = {"native": 1}
+    for number in (1, 2):
+        bundle = tmp_path / f"export-{number}"
+        bundle.mkdir()
+        (bundle / "result.json").write_text(
+            json.dumps(
+                {
+                    "chats": {
+                        "list": [
+                            {
+                                "id": 5,
+                                "name": "Synthetic collision",
+                                "messages": [
+                                    {
+                                        "id": 1048576,
+                                        "type": "message",
+                                        "date": "2026-03-31T21:00:00Z",
+                                        "date_unixtime": "1774990800",
+                                        "text": f"Export {number}",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        imported = import_telegram_export(paths, export_path=bundle, account="personal")
+        expected_lines[f"export:{imported.import_id}"] = number + 1
+    normalized, _ = normalize_telegram_day(paths, date="2026-03-31")
+    events = read_jsonl(normalized)
+    # Current normalization omits the audit namespace and selects the final export.
+    assert len(events) == 1 and events[0]["text"] == "Export 2"
+    assert events[0]["raw_ref"]["locator"]["line"] == 3
+    before = snapshot(tmp_path)
+
+    result = runner.invoke(app, ["events", "overlaps", "--root", str(paths.root)])
+
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.stdout)
+    assert report["groups"] == []  # No repeated key within any single audit namespace.
+    assert len(report["normalization_collisions"]) == 1
+    collision = report["normalization_collisions"][0]
+    assert collision["reason"] == "telegram_namespace_not_in_event_id"
+    assert collision["event_id"] == events[0]["event_id"]
+    assert collision["key"] == {
+        "source": "telegram",
+        "account": "personal",
+        "conversation_id": "5",
+        "message_id": "1048576",
+    }
+    assert collision["payload_variants"] == 3
+    for namespace in collision["namespaces"]:
+        observation = namespace["observations"][0]
+        assert len(namespace["observations"]) == 1
+        assert observation["raw_ref"]["locator"]["line"] == expected_lines[namespace["namespace"]]
+        raw = paths.root / observation["raw_ref"]["path"]
+        row = json.loads(raw.read_text().splitlines()[expected_lines[namespace["namespace"]] - 1])
+        assert (
+            observation["record_sha256"]
+            == hashlib.sha256(
+                json.dumps(row, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+        )
+    repeat = runner.invoke(app, ["events", "overlaps", "--root", str(paths.root)])
+    assert repeat.exit_code == 0 and repeat.stdout == result.stdout
+    assert snapshot(tmp_path) == before
+
+
+def test_overlaps_warns_for_two_exports_without_native_capture(tmp_path) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    rows = [telegram_row(capture_mode="import", import_id=bundle) for bundle in ("one", "two")]
+    write_jsonl(paths.raw_capture_dir("telegram", "2026-03-31") / "updates.jsonl", rows)
+    before = snapshot(tmp_path)
+
+    report = inspect_overlaps(paths, sources=["telegram"])
+
+    assert report["groups"] == []
+    assert len(report["normalization_collisions"]) == 1
+    collision = report["normalization_collisions"][0]
+    assert collision["payload_variants"] == 1
+    assert [n["namespace"] for n in collision["namespaces"]] == ["export:one", "export:two"]
+    lines = [n["observations"][0]["raw_ref"]["locator"]["line"] for n in collision["namespaces"]]
+    assert lines == [1, 2]
+    assert snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("change", ["account", "chat", "message", "same_namespace"])
+def test_overlaps_does_not_warn_for_separate_keys_or_one_import_namespace(tmp_path, change) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    original = telegram_row(capture_mode="import", import_id="one")
+    other = telegram_row(capture_mode="import", import_id="two")
+    if change == "account":
+        other["account"] = "work"
+    elif change == "chat":
+        other["payload"]["message"]["chat_id"] = 7
+    elif change == "message":
+        other["payload"]["message"]["id"] = 8
+    else:
+        other["import_id"] = "one"
+    write_jsonl(
+        paths.raw_capture_dir("telegram", "2026-03-31") / "updates.jsonl", [original, other]
+    )
+
+    report = inspect_overlaps(paths, sources=["telegram"])
+
+    assert report["normalization_collisions"] == []
