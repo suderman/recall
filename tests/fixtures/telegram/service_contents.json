@@ -1,0 +1,77 @@
+[
+  {
+    "content": {"@type": "messageUnsupported"},
+    "text": "Telegram unsupported content (body unavailable)",
+    "tag": "unsupported"
+  },
+  {
+    "content": {
+      "@type": "messageAnimatedEmoji",
+      "emoji": "🙋🏽‍♀️",
+      "animated_emoji": {"@type": "animatedEmoji", "sticker": {"sticker": {"id": 500}}}
+    },
+    "text": "🙋🏽‍♀️",
+    "tag": "animated_emoji"
+  },
+  {
+    "content": {"@type": "messageAnimatedEmoji"},
+    "text": "Telegram animated emoji (emoji unavailable)",
+    "tag": "animated_emoji"
+  },
+  {
+    "content": {"@type": "messageAnimatedEmoji", "emoji": ""},
+    "text": "Telegram animated emoji (emoji unavailable)",
+    "tag": "animated_emoji"
+  },
+  {
+    "content": {
+      "@type": "messageCall",
+      "discard_reason": {"@type": "callDiscardReasonHungUp"},
+      "duration": 120,
+      "is_video": true,
+      "unique_id": 123
+    },
+    "text": "Telegram video call; duration: 120 seconds; discard reason: callDiscardReasonHungUp",
+    "tag": "call"
+  },
+  {
+    "content": {
+      "@type": "messageCall",
+      "discard_reason": {"@type": "callDiscardReasonMissed"},
+      "duration": 0,
+      "is_video": false,
+      "unique_id": 124
+    },
+    "text": "Telegram audio call; duration: 0 seconds; discard reason: callDiscardReasonMissed",
+    "tag": "call"
+  },
+  {
+    "content": {"@type": "messageCall"},
+    "text": "Telegram call",
+    "tag": "call"
+  },
+  {
+    "content": {
+      "@type": "messageCall",
+      "discard_reason": {"@type": "callDiscardReasonDeclined"}
+    },
+    "text": "Telegram call; discard reason: callDiscardReasonDeclined",
+    "tag": "call"
+  },
+  {
+    "content": {
+      "@type": "messageCall",
+      "discard_reason": {"@type": "callDiscardReasonDisconnected"},
+      "duration": 5,
+      "is_video": false,
+      "unique_id": 125
+    },
+    "text": "Telegram audio call; duration: 5 seconds; discard reason: callDiscardReasonDisconnected",
+    "tag": "call"
+  },
+  {
+    "content": {"@type": "messageContactRegistered"},
+    "text": "Telegram contact registration notification",
+    "tag": "contact_registered"
+  }
+]

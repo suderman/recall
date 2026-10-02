@@ -362,6 +362,28 @@ remain unchanged, and missing names stay unresolved. Use `recall rebuild` with
 an explicit timezone to group late receipts by message day instead of receipt
 day. An empty queue does not prove complete Telegram history.
 
+Saved TDLib service content has deterministic text and type tags. These
+representations are covered by synthetic fixtures:
+
+| Content type | Text | Added tag |
+| --- | --- | --- |
+| `messageUnsupported` | `Telegram unsupported content (body unavailable)` | `unsupported` |
+| `messageAnimatedEmoji` | The literal Unicode `emoji`, or `Telegram animated emoji (emoji unavailable)` when missing or empty | `animated_emoji` |
+| `messageCall` | `Telegram call`, or `Telegram audio call` / `Telegram video call` when `is_video` is a boolean | `call` |
+| `messageContactRegistered` | `Telegram contact registration notification` | `contact_registered` |
+
+Calls append `; duration: N seconds` only for a saved nonnegative integer,
+including zero. Missing or invalid duration adds nothing. A saved nonempty
+`discard_reason.@type` appends `; discard reason: TYPE` with its literal value.
+Neither duration nor discard reason proves who answered or whether the call
+succeeded. Contact registration does not establish when people met or first
+spoke. Unsupported content cannot recover a missing body.
+
+These events remain `kind="message"`, with `message` and `telegram` tags and
+physical raw references. Animated emoji do not create artifact records or
+trigger downloads. Existing media captions, including empty captions, are
+unchanged.
+
 Telegram TDLib setup steps:
 
 1. Create or sign into a Telegram account with the phone number you want Recall

@@ -185,6 +185,31 @@ def _extract_text_and_tags(content: dict[str, Any]) -> tuple[str, list[str]]:
     if content_type == "messageSticker":
         emoji = str(content.get("sticker", {}).get("emoji") or "").strip()
         return emoji, tags + ["sticker"]
+    if content_type == "messageUnsupported":
+        return "Telegram unsupported content (body unavailable)", tags + ["unsupported"]
+    if content_type == "messageAnimatedEmoji":
+        emoji = content.get("emoji")
+        text = (
+            emoji
+            if isinstance(emoji, str) and emoji
+            else "Telegram animated emoji (emoji unavailable)"
+        )
+        return text, tags + ["animated_emoji"]
+    if content_type == "messageCall":
+        is_video = content.get("is_video")
+        text = "Telegram call"
+        if isinstance(is_video, bool):
+            text = "Telegram video call" if is_video else "Telegram audio call"
+        duration = content.get("duration")
+        if type(duration) is int and duration >= 0:
+            text += f"; duration: {duration} seconds"
+        discard_reason = content.get("discard_reason")
+        reason = discard_reason.get("@type") if isinstance(discard_reason, dict) else None
+        if isinstance(reason, str) and reason:
+            text += f"; discard reason: {reason}"
+        return text, tags + ["call"]
+    if content_type == "messageContactRegistered":
+        return "Telegram contact registration notification", tags + ["contact_registered"]
     return str(content.get("caption", {}).get("text") or ""), tags
 
 

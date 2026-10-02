@@ -165,6 +165,7 @@ Keep this section current as implementation advances.
 - [x] Bounded offline Telegram queue drain with saved-context labels and no authentication
 - [x] Telegram Desktop export import/backfill for extracted directories and zip bundles
 - [x] Telegram normalization for text, photos, documents, voice notes, video, animation, audio, stickers, and video notes
+- [x] Synthetic-fixture-tested Telegram representations for unsupported content, animated emoji, calls, and contact registration
 - [x] Telegram artifact byte download support using local-path, file-id, and remote-id fallback through TDLib
 - [x] SQLite-backed people, identities, aliases, identity aliases, and resolutions storage
 - [x] Entity inspection CLI: `recall entities show people|identities|resolutions`
