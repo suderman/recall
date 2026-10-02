@@ -6,6 +6,8 @@ import sqlite3
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from recall.connectors.telegram.artifacts import download_telegram_artifacts
 from recall.connectors.telegram.capture import (
     append_telegram_update,
@@ -297,6 +299,63 @@ def test_normalize_telegram_reply_forward_and_album_threading(tmp_path) -> None:
     assert "forwarded" in records[1]["tags"]
     assert records[2]["thread_id"] == "album:777"
     assert "album" in records[2]["tags"]
+
+
+@pytest.mark.parametrize(
+    ("album_fields", "expected_album"),
+    [
+        ({}, None),
+        ({"media_album_id": None}, None),
+        ({"media_album_id": 0}, None),
+        ({"media_album_id": "0"}, None),
+        ({"media_album_id": 777}, "album:777"),
+        ({"media_album_id": "777"}, "album:777"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("reply_fields", "expected_reply"),
+    [
+        ({}, None),
+        ({"reply_to_message_id": 9100}, "reply:9100"),
+        ({"reply_to": {"message_id": 9100}}, "reply:9100"),
+        ({"reply_to": {"origin": {"message_id": 9100}}}, "reply:9100"),
+    ],
+)
+@pytest.mark.parametrize(
+    "content",
+    [
+        {"@type": "messageText", "text": {"text": "ordinary text"}},
+        {"@type": "messageContactRegistered"},
+        {"@type": "messagePhoto", "caption": {"text": "photo"}},
+    ],
+)
+def test_normalize_telegram_album_sentinels(
+    tmp_path, album_fields, expected_album, reply_fields, expected_reply, content
+) -> None:
+    paths = RecallPaths.from_root(tmp_path)
+    target_dir = paths.raw_capture_dir("telegram", "2026-04-03")
+    target_dir.mkdir(parents=True)
+    message = {
+        "chat_id": 1003,
+        "id": 9203,
+        "date": 1774976469,
+        "content": content,
+        "sender_id": {"@type": "messageSenderUser", "user_id": 42},
+        **album_fields,
+        **reply_fields,
+    }
+    (target_dir / "updates.jsonl").write_text(
+        json.dumps({"account": "personal", "payload": {"message": message}, "source": "telegram"})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    event_path, _ = normalize_telegram_day(paths, date="2026-04-03")
+    event = json.loads(event_path.read_text(encoding="utf-8"))
+
+    assert event["thread_id"] == (expected_reply or expected_album)
+    assert ("album" in event["tags"]) == (expected_album is not None)
+    assert ("reply" in event["tags"]) == (expected_reply is not None)
 
 
 def test_normalize_telegram_tdlib_photo_uses_nested_file_metadata(tmp_path) -> None:

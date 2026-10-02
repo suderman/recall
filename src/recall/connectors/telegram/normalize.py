@@ -226,7 +226,7 @@ def _thread_id(message: dict[str, Any]) -> str | None:
             return f"reply:{message_id}"
 
     media_album_id = message.get("media_album_id")
-    if media_album_id is not None:
+    if media_album_id not in (None, 0, "0"):
         return f"album:{media_album_id}"
     return None
 
@@ -237,7 +237,7 @@ def _message_tags(message: dict[str, Any], tags: list[str]) -> list[str]:
         result.append("reply")
     if message.get("forward_info") is not None:
         result.append("forwarded")
-    if message.get("media_album_id") is not None:
+    if message.get("media_album_id") not in (None, 0, "0"):
         result.append("album")
     return result
 
