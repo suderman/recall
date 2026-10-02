@@ -867,6 +867,14 @@ def test_download_telegram_artifacts_uses_tdlib_when_local_file_missing(tmp_path
     paths = RecallPaths.from_root(tmp_path)
     downloaded_file = tmp_path / "tdlib-photo.jpg"
     downloaded_file.write_bytes(b"tdlib-photo")
+    capture = append_telegram_update(
+        paths,
+        account="personal",
+        update_type="updateNewMessage",
+        received_at="2026-04-02T10:00:00Z",
+        capture_mode="stream",
+        payload={"message": {"content": {"@type": "messagePhoto", "photo": {"id": 321}}}},
+    )
     artifact_path = paths.artifact_metadata_path("telegram", "2026-04-02")
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(
@@ -887,7 +895,11 @@ def test_download_telegram_artifacts_uses_tdlib_when_local_file_missing(tmp_path
                 "download_status": "not_requested",
                 "last_error": None,
                 "observed_at": "2026-04-02T10:00:00Z",
-                "raw_ref": None,
+                "raw_ref": {
+                    "source": "telegram",
+                    "path": paths.relative_to_root(capture.updates_path),
+                    "locator": {"line": 1},
+                },
             }
         )
         + "\n",
@@ -910,6 +922,21 @@ def test_download_telegram_artifacts_uses_remote_id_fallback(tmp_path) -> None:
     paths = RecallPaths.from_root(tmp_path)
     downloaded_file = tmp_path / "tdlib-remote-photo.jpg"
     downloaded_file.write_bytes(b"tdlib-remote-photo")
+    capture = append_telegram_update(
+        paths,
+        account="personal",
+        update_type="updateNewMessage",
+        received_at="2026-04-02T10:00:00Z",
+        capture_mode="tdlib-run",
+        payload={
+            "message": {
+                "content": {
+                    "@type": "messagePhoto",
+                    "photo": {"id": 1258, "remote": {"id": "remote-photo-123"}},
+                }
+            }
+        },
+    )
     artifact_path = paths.artifact_metadata_path("telegram", "2026-04-02")
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(
@@ -933,7 +960,11 @@ def test_download_telegram_artifacts_uses_remote_id_fallback(tmp_path) -> None:
                 "download_status": "not_requested",
                 "last_error": None,
                 "observed_at": "2026-04-02T10:00:00Z",
-                "raw_ref": None,
+                "raw_ref": {
+                    "source": "telegram",
+                    "path": paths.relative_to_root(capture.updates_path),
+                    "locator": {"line": 1},
+                },
             }
         )
         + "\n",

@@ -527,6 +527,12 @@ recall state show slack
 recall events show --date 2026-03-31
 ```
 
+Telegram artifact downloads copy available local files without starting TDLib.
+TDLib fallback requires a retained raw reference to a native capture record for
+the same account. Missing export files and unproved source records become
+`not_available`; synthetic export file keys never reach numeric or remote-ID
+fallback. Dry runs do not initialize TDLib or write metadata or blobs.
+
 ## Inspect repeated source records
 
 ```bash

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from recall.connectors.telegram.normalize import _file_details, _message
 from recall.storage.jsonl import read_jsonl, write_jsonl
 from recall.storage.paths import RecallPaths
 
@@ -79,6 +81,84 @@ def _remote_id(artifact: dict[str, Any]) -> str | None:
     return None
 
 
+def _native_artifact_ids(paths: RecallPaths, artifacts: list[dict[str, Any]]) -> set[str]:
+    # Read each referenced capture once, retaining physical line numbers.
+    references: dict[Path, dict[int, list[dict[str, Any]]]] = {}
+    for artifact in artifacts:
+        raw = artifact.get("raw_ref")
+        if not isinstance(raw, dict) or raw.get("source") != "telegram":
+            continue
+        locator = raw.get("locator")
+        if not isinstance(locator, dict) or not isinstance(raw.get("path"), str):
+            continue
+        line = locator.get("line")
+        if not raw["path"]:
+            continue
+        if type(line) is not int or line < 1:
+            continue
+        path = paths.root / raw["path"]
+        references.setdefault(path, {}).setdefault(line, []).append(artifact)
+
+    native: set[str] = set()
+    modes = {"manual", "stream", "tdlib-once", "tdlib-run", "tdlib-daemon", "pending-offline"}
+    for path, lines in references.items():
+        last_line = max(lines)
+        try:
+            with path.open(encoding="utf-8") as stream:
+                for number, text in enumerate(stream, 1):
+                    if number in lines:
+                        try:
+                            row = json.loads(text)
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(row, dict):
+                            continue
+                        mode = row.get("capture_mode")
+                        if row.get("source") != "telegram" or not isinstance(mode, str):
+                            continue
+                        if mode not in modes:
+                            continue
+                        payload = row.get("payload")
+                        if not isinstance(payload, dict):
+                            continue
+                        content = _message(payload).get("content")
+                        details = _file_details(content) if isinstance(content, dict) else None
+                        if details is None:
+                            continue
+                        _, file, _ = details
+                        remote = file.get("remote") or {}
+                        if not isinstance(remote, dict):
+                            continue
+                        file_id = str(file.get("id") or remote.get("id") or f"line-{number}")
+                        for artifact in lines[number]:
+                            if (
+                                str(row.get("account") or "personal") == artifact.get("account")
+                                and artifact.get("source_object_id") == file_id
+                                and _remote_id(artifact) == (remote.get("id") or None)
+                            ):
+                                native.add(artifact["artifact_id"])
+                    if number >= last_line:
+                        break
+        except (OSError, UnicodeError):
+            continue
+    return native
+
+
+def telegram_artifacts_need_tdlib(paths: RecallPaths, *, date: str, force: bool = False) -> bool:
+    artifacts = read_jsonl(paths.artifact_metadata_path("telegram", date))
+    native = _native_artifact_ids(paths, artifacts)
+    return any(
+        artifact["artifact_id"] in native
+        and _choose_local_source_path(artifact) is None
+        and not (
+            not force
+            and artifact.get("download_status") == "downloaded"
+            and _blob_path(paths, date=date, artifact=artifact).exists()
+        )
+        for artifact in artifacts
+    )
+
+
 def _copy_with_checksum(source_path: Path, destination_path: Path) -> str:
     checksum = hashlib.sha256()
     with source_path.open("rb") as source_handle, destination_path.open("wb") as destination_handle:
@@ -105,6 +185,11 @@ def download_telegram_artifacts(
         raise FileNotFoundError(f"No artifact metadata file found at {artifact_path}")
 
     artifacts = read_jsonl(artifact_path)
+    native = (
+        _native_artifact_ids(paths, artifacts)
+        if policy == "download-source-native" and not dry_run
+        else set()
+    )
     would_download = 0
     downloaded = 0
     skipped_policy = 0
@@ -133,7 +218,7 @@ def download_telegram_artifacts(
 
         source_path = _choose_local_source_path(artifact)
         tdlib_errors: list[str] = []
-        if source_path is None:
+        if source_path is None and artifact["artifact_id"] in native:
             source_object_id = str(artifact.get("source_object_id") or "").strip()
             if client is not None and source_object_id.isdigit():
                 try:
@@ -173,7 +258,13 @@ def download_telegram_artifacts(
             artifact["last_error"] = (
                 "; ".join(tdlib_errors)
                 if tdlib_errors
-                else ("No Telegram local file, file id, or remote id produced a downloadable file")
+                else (
+                    "No Telegram local file; TDLib fallback requires a saved native source record"
+                    if artifact["artifact_id"] not in native
+                    else (
+                        "No Telegram local file, file id, or remote id produced a downloadable file"
+                    )
+                )
             )
             failed += 1
             continue

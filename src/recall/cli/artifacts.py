@@ -13,7 +13,10 @@ from recall.connectors.bluebubbles.artifacts import download_bluebubbles_artifac
 from recall.connectors.bluebubbles.config import bluebubbles_config_path, load_bluebubbles_config
 from recall.connectors.slack.artifacts import download_slack_artifacts
 from recall.connectors.slack.config import load_slack_config, slack_config_path
-from recall.connectors.telegram.artifacts import download_telegram_artifacts
+from recall.connectors.telegram.artifacts import (
+    download_telegram_artifacts,
+    telegram_artifacts_need_tdlib,
+)
 from recall.connectors.telegram.config import load_telegram_config
 from recall.connectors.telegram.tdlib import (
     TdlibJsonTransport,
@@ -340,7 +343,6 @@ def download_telegram_artifact_bytes(
 ) -> None:
     """Download source-native Telegram artifact bytes for one day."""
 
-    load_dotenv()
     paths = _paths_for(root)
     paths.ensure_directories()
     config = load_telegram_config(paths)
@@ -365,7 +367,8 @@ def download_telegram_artifact_bytes(
 
     tdlib_client = None
     tdlib_error: str | None = None
-    if not dry_run:
+    if not dry_run and telegram_artifacts_need_tdlib(paths, date=date, force=force):
+        load_dotenv()
         try:
             settings = build_tdlib_auth_settings(paths, config)
             transport = TdlibJsonTransport(
