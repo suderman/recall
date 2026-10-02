@@ -19,7 +19,7 @@ from recall.cli.entities import (
     show_resolutions,
     show_unresolved_identities,
 )
-from recall.cli.events import show_events
+from recall.cli.events import show_events, show_overlaps
 from recall.cli.journal import build as build_journals
 from recall.cli.journal import prepare as prepare_journal
 from recall.cli.journal import publish as publish_journal
@@ -202,6 +202,7 @@ search_app.command("query")(search_history)
 search_app.command("person")(recall_person)
 search_app.command("project")(recall_project)
 events_app.command("show")(show_events)
+events_app.command("overlaps")(show_overlaps)
 artifacts_app.command("show")(show_artifacts)
 artifacts_download_app.command("slack")(download_slack_artifact_bytes)
 artifacts_download_app.command("bluebubbles")(download_bluebubbles_artifact_bytes)

@@ -7,12 +7,32 @@ from typing import Any
 import typer
 
 from recall.config import resolve_root
+from recall.dedupe import inspect_overlaps
 from recall.storage.jsonl import read_jsonl
 from recall.storage.paths import RecallPaths
 
 
 def _paths_for(root: Path | None) -> RecallPaths:
     return RecallPaths.from_root(resolve_root(root))
+
+
+def show_overlaps(
+    root: Path | None = typer.Option(None, "--root", resolve_path=True),
+    source: list[str] | None = typer.Option(
+        None,
+        "--source",
+        help="Saved source: telegram or bluebubbles. Repeat to select both.",
+    ),
+    account: str | None = typer.Option(None, "--account", help="Inspect only this source account."),
+) -> None:
+    """Report repeated raw source IDs as JSON without changing archive state."""
+    try:
+        report = inspect_overlaps(
+            _paths_for(root), sources=source or ["telegram", "bluebubbles"], account=account
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(json.dumps(report, indent=2, ensure_ascii=True, sort_keys=True))
 
 
 def _render_event(event: dict[str, Any]) -> list[str]:

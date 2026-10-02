@@ -527,6 +527,33 @@ recall state show slack
 recall events show --date 2026-03-31
 ```
 
+## Inspect repeated source records
+
+```bash
+recall events overlaps --root /path/to/archive
+recall events overlaps --root /path/to/archive --source telegram --account personal
+```
+
+This read-only command scans saved Telegram and BlueBubbles daily raw logs. JSON
+output groups repeated source/account/conversation/message keys, with every
+physical raw-file line, capture mode, import ID, and SHA-256 hashes of the envelope
+and message payload. Differing payloads remain separate observations. Missing
+message keys are listed separately; the command never fills them from text or
+receipt time.
+
+BlueBubbles preserves native GUIDs across live capture and imports. Telegram
+exports stay in a separate namespace for each import bundle. Their keys can be
+synthesized by the importer, so repeated export keys are candidates, not proof of
+matching native message IDs. The command does not match exports to TDLib, match
+across sources, rewrite normalized events, or create a database. Normalized
+upsert still keeps one selected raw reference per event, not a join ledger.
+
+Isolated rebuilds process capture days in sorted order and records in physical
+line order. For one event ID on one output day, the last processed observation
+wins. This is replay order, not a comparison of source edit timestamps. Rebuild
+coverage counts distinct event IDs per day, even when several capture days
+contain the same message. Search indexes the selected normalized record.
+
 ## Capture bounded Slack history
 
 Choose the account label and date range before making a remote pull. The token
