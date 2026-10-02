@@ -353,7 +353,7 @@ def _rebuild(
                     "source": source,
                     "date": day,
                     "status": status,
-                    "event_count": len(rows),
+                    "event_count": len({row["event_id"] for row in rows}),
                     "error": error,
                     "fingerprint": fingerprint,
                     "options": options,
