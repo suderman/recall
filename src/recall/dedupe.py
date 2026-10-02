@@ -67,7 +67,7 @@ def inspect_overlaps(
                         if row.get("capture_mode") == "import":
                             # Desktop IDs are not proved equivalent to TDLib IDs.
                             import_id = row.get("import_id")
-                            if not isinstance(import_id, str) or not import_id:
+                            if not isinstance(import_id, str) or not import_id.strip():
                                 reason = "missing_import_id"
                             namespace = f"export:{import_id}"
                     else:
@@ -104,10 +104,16 @@ def inspect_overlaps(
                         continue
                     key = (source, selected_account, namespace, conversation_id, message_id)
                     groups.setdefault(key, []).append(observation)
-    telegram_keys: dict[tuple[str, str, str], dict[str, list[dict[str, Any]]]] = {}
+    telegram_keys: dict[tuple[str, ...], dict[str, list[dict[str, Any]]]] = {}
     for (source, selected_account, namespace, conversation_id, message_id), rows in groups.items():
         if source == "telegram":
-            telegram_keys.setdefault((selected_account, conversation_id, message_id), {})[
+            event_id = telegram_event_id(
+                selected_account,
+                conversation_id,
+                message_id,
+                import_id=namespace.removeprefix("export:") if namespace != "native" else None,
+            )
+            telegram_keys.setdefault((event_id, selected_account, conversation_id, message_id), {})[
                 namespace
             ] = rows
     return {
@@ -140,11 +146,11 @@ def inspect_overlaps(
         ],
         "normalization_collisions": [
             {
-                "reason": "telegram_namespace_not_in_event_id",
-                "event_id": telegram_event_id(*key),
+                "reason": "shared_normalized_event_id",
+                "event_id": key[0],
                 "key": {
                     "source": "telegram",
-                    **dict(zip(("account", "conversation_id", "message_id"), key, strict=True)),
+                    **dict(zip(("account", "conversation_id", "message_id"), key[1:], strict=True)),
                 },
                 "payload_variants": len(
                     {row["payload_sha256"] for rows in namespaces.values() for row in rows}
@@ -159,7 +165,7 @@ def inspect_overlaps(
         ],
         "limitations": [
             "No records are joined or rewritten; differing payloads remain observations.",
-            "Telegram audit namespaces do not isolate current normalized event IDs.",
+            "Telegram imported event and artifact IDs include their retained bundle namespace.",
             "Normalization collisions warn of shared IDs, not proved message equivalence.",
             "Telegram exports are grouped only within one import bundle, not with TDLib.",
             "Export keys may be synthesized by the importer, not original source IDs.",

@@ -242,13 +242,31 @@ def _message_tags(message: dict[str, Any], tags: list[str]) -> list[str]:
     return result
 
 
-def _artifact_id(account: str, message_id: int | str, file_id: str) -> str:
-    payload = f"telegram:{account}:artifact:{message_id}:{file_id}".encode("utf-8")
+def _artifact_id(
+    account: str, message_id: int | str, file_id: str, *, imported_event_id: str | None = None
+) -> str:
+    if imported_event_id is not None:
+        payload = json.dumps(
+            ["telegram-export-artifact-v1", imported_event_id, file_id],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    else:
+        payload = f"telegram:{account}:artifact:{message_id}:{file_id}".encode("utf-8")
     return f"artifact_{hashlib.sha256(payload).hexdigest()[:20]}"
 
 
-def _event_id(account: str, chat_id: int | str, message_id: int | str) -> str:
-    payload = f"telegram:{account}:{chat_id}:{message_id}".encode("utf-8")
+def _event_id(
+    account: str, chat_id: int | str, message_id: int | str, *, import_id: str | None = None
+) -> str:
+    if import_id is not None:
+        payload = json.dumps(
+            ["telegram-export-v1", account, import_id, str(chat_id), str(message_id)],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    else:
+        payload = f"telegram:{account}:{chat_id}:{message_id}".encode("utf-8")
     return f"evt_{hashlib.sha256(payload).hexdigest()[:20]}"
 
 
@@ -399,6 +417,7 @@ def _artifact_records(
     timestamp: str,
     raw_path: str,
     line_number: int,
+    import_id: str | None = None,
 ) -> list[NormalizedArtifact]:
     file_details = _file_details(content)
     if file_details is None:
@@ -431,7 +450,10 @@ def _artifact_records(
     return [
         NormalizedArtifact(
             artifact_id=_artifact_id(
-                account, str(message.get("id") or f"line-{line_number}"), file_id
+                account,
+                str(message.get("id") or f"line-{line_number}"),
+                file_id,
+                imported_event_id=event_id if import_id is not None else None,
             ),
             source="telegram",
             account=account,
@@ -469,6 +491,14 @@ def normalize_telegram_day(paths: RecallPaths, *, date: str) -> tuple[Path, Path
     artifacts: list[NormalizedArtifact] = []
 
     for row in rows:
+        import_id = None
+        if row.get("capture_mode") == "import":
+            namespace = row.get("import_id")
+            if not isinstance(namespace, str) or not namespace.strip():
+                raise ValueError(
+                    f"Missing Telegram import_id at {updates_path}:{row['_line_number']}"
+                )
+            import_id = namespace
         payload_value = row.get("payload")
         payload: dict[str, Any] = payload_value if isinstance(payload_value, dict) else {}
         message = _message(payload)
@@ -481,7 +511,7 @@ def normalize_telegram_day(paths: RecallPaths, *, date: str) -> tuple[Path, Path
 
         timestamp = _to_iso(message.get("date"), str(row.get("received_at") or f"{date}T00:00:00Z"))
         account = str(row.get("account") or "personal")
-        event_id = _event_id(account, chat_id, message_id)
+        event_id = _event_id(account, chat_id, message_id, import_id=import_id)
         raw_path = paths.relative_to_root(updates_path)
         text, tags = _extract_text_and_tags(content)
         event_artifacts = _artifact_records(
@@ -492,6 +522,7 @@ def normalize_telegram_day(paths: RecallPaths, *, date: str) -> tuple[Path, Path
             timestamp=timestamp,
             raw_path=raw_path,
             line_number=row["_line_number"],
+            import_id=import_id,
         )
         artifacts.extend(event_artifacts)
         events.append(

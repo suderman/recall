@@ -548,12 +548,26 @@ matching native message IDs. The command does not match exports to TDLib, match
 across sources, rewrite normalized events, or create a database. Normalized
 upsert still keeps one selected raw reference per event, not a join ledger.
 
-The `normalization_collisions` list warns when different Telegram audit namespaces
-share a current normalized event ID. It includes the event ID and every observation
-under each namespace. Audit namespace separation does not protect normalized
-storage: current Telegram event IDs omit the import bundle, so normalization can
-replace one namespace's record with another. These warnings do not prove that the
-messages are equivalent. The command does not change IDs or prevent replacement.
+Telegram normalization keeps native event and artifact IDs unchanged. Imported
+event IDs hash the compact ASCII JSON array
+`["telegram-export-v1", account, import_id, str(chat_id), str(message_id)]`.
+Imported artifact IDs hash
+`["telegram-export-artifact-v1", event_id, source_object_id]`. Both use SHA-256's
+first 20 hex characters with the existing `evt_` and `artifact_` prefixes. The
+normalizer uses the retained import ID, not a moved export path, and rejects
+missing, non-string or blank import IDs before publishing records. This separates
+bundles and native messages without claiming Desktop/TDLib equivalence.
+
+The `normalization_collisions` list reports shared current event IDs across audit
+namespaces, not legacy IDs already in storage. It includes every observation under
+each namespace. These warnings do not prove that messages are equivalent. The
+read-only command does not change IDs or migrate stored records.
+
+Replay old imports into a fresh workspace before building a new index or journal
+packet. In-place normalization can leave old event and artifact IDs behind. New
+import IDs must not inherit old acquired bytes or checksums solely through an old
+ID match. Preserve old artifacts, packets and journals; ID isolation does not
+rewrite historical citations or migrate canonical data.
 
 Isolated rebuilds process capture days in sorted order and records in physical
 line order. For one event ID on one output day, the last processed observation
