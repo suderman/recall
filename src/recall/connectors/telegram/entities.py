@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from recall.connectors.telegram.capture import parse_date, raw_capture_paths
+from recall.connectors.telegram.export_scope import ExportScope, export_scope
 from recall.entities.storage import (
     upsert_aliases,
     upsert_identities,
@@ -29,9 +30,11 @@ class TelegramEntitySyncResult:
 def _load_raw_updates(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as handle:
-        for line in handle:
+        for number, line in enumerate(handle, 1):
             if line.strip():
-                rows.append(json.loads(line))
+                row = json.loads(line)
+                row["_line_number"] = number
+                rows.append(row)
     return rows
 
 
@@ -223,6 +226,61 @@ def _resolution_row(
     }
 
 
+def _export_observations(
+    scope: ExportScope, payload: dict[str, Any], created_at: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    person_rows: list[dict[str, Any]] = []
+    identity_rows: list[dict[str, Any]] = []
+    alias_rows: list[dict[str, Any]] = []
+    observations: dict[tuple[str, str], list[str]] = {}
+    for user in payload.get("users") or []:
+        if not isinstance(user, dict) or user.get("id") is None:
+            continue
+        user_id = str(user["id"])
+        person = _person_row(user, created_at)
+        person.update(person_id=scope.person(user_id), tags=["telegram_export_observation"])
+        person_rows.append(person)
+        observations.setdefault(("user", user_id), []).append(_display_name(user))
+        for username in _usernames(user):
+            observations.setdefault(("username", username), []).append(f"@{username}")
+            observations[("user", user_id)].append(f"@{username}")
+        phone = str(user.get("phone_number") or "").strip()
+        if phone:
+            observations.setdefault(("phone", phone), []).append(phone)
+            observations[("user", user_id)].append(phone)
+    chat = _chat(payload)
+    for observed_chat in (chat, payload.get("sender_chat") or {}):
+        if observed_chat.get("id") is not None:
+            observations.setdefault(("chat", str(observed_chat["id"])), []).append(
+                str(observed_chat.get("title") or "").strip()
+            )
+    message = _message(payload)
+    sender = message.get("sender_id") or {}
+    for kind, field in (("user", "user_id"), ("chat", "chat_id")):
+        if sender.get(field) is not None:
+            observations.setdefault((kind, str(sender[field])), [])
+    for user_id in chat.get("participant_user_ids") or []:
+        observations.setdefault(("user", str(user_id)), [])
+    for (kind, value), labels in observations.items():
+        identity_id = scope.identity(kind, value)
+        # Export keys and labels do not prove ownership, even when numeric.
+        identity_rows.append(
+            _identity_row(
+                identity_id=identity_id,
+                person_id=None,
+                kind=f"export_{kind}",
+                value=scope.value(kind, value),
+                label=f"Telegram export {kind} observation",
+                created_at=created_at,
+            )
+        )
+        for label in sorted(set(labels) - {""}):
+            alias_rows.append(
+                _identity_alias_row(identity_id, label, "telegram_export_observation", created_at)
+            )
+    return person_rows, identity_rows, alias_rows
+
+
 def sync_telegram_entities(paths: RecallPaths, *, date: str) -> TelegramEntitySyncResult:
     parse_date(date)
     paths.ensure_directories()
@@ -231,6 +289,7 @@ def sync_telegram_entities(paths: RecallPaths, *, date: str) -> TelegramEntitySy
         raise FileNotFoundError(f"Missing Telegram raw capture for {date} in {raw_dir}")
 
     rows = _load_raw_updates(updates_path)
+    scopes = [export_scope(row, f"{updates_path}:{row['_line_number']}") for row in rows]
     created_at = _created_at(rows, date)
     person_rows: list[dict[str, Any]] = []
     identity_rows: list[dict[str, Any]] = []
@@ -247,12 +306,28 @@ def sync_telegram_entities(paths: RecallPaths, *, date: str) -> TelegramEntitySy
     users_by_id: dict[str, dict[str, Any]] = {}
     chats: list[dict[str, Any]] = []
 
-    for row in rows:
+    export_persons: list[dict[str, Any]] = []
+    export_identities: list[dict[str, Any]] = []
+    export_aliases: list[dict[str, Any]] = []
+    for row, scope in zip(rows, scopes, strict=True):
         payload = _payload(row)
+        if scope:
+            observed_persons, observed_identities, observed_aliases = _export_observations(
+                scope, payload, created_at
+            )
+            export_persons.extend(observed_persons)
+            export_identities.extend(observed_identities)
+            export_aliases.extend(observed_aliases)
+            continue
         chats.append(_chat(payload))
         for user in payload.get("users") or []:
             if isinstance(user, dict) and user.get("id") is not None:
                 users_by_id[str(user["id"])] = user
+
+    # Count each observed key once and keep its last label in this capture day.
+    export_persons = list({row["person_id"]: row for row in export_persons}.values())
+    export_identities = list({row["identity_id"]: row for row in export_identities}.values())
+    export_aliases = list({row["identity_alias_id"]: row for row in export_aliases}.values())
 
     for user in users_by_id.values():
         user_id = str(user["id"])
@@ -432,10 +507,14 @@ def sync_telegram_entities(paths: RecallPaths, *, date: str) -> TelegramEntitySy
                 )
                 identity_alias_seen.add(key)
 
-    persons_synced = upsert_persons(paths, person_rows)
-    identities_synced = upsert_identities(paths, identity_rows)
+    persons_synced = upsert_persons(paths, person_rows) + upsert_persons(
+        paths, export_persons, preserve_existing=True
+    )
+    identities_synced = upsert_identities(paths, identity_rows) + upsert_identities(
+        paths, export_identities, preserve_existing=True
+    )
     person_aliases_synced = upsert_aliases(paths, person_alias_rows)
-    aliases_synced = upsert_identity_aliases(paths, identity_alias_rows)
+    aliases_synced = upsert_identity_aliases(paths, identity_alias_rows + export_aliases)
     resolutions_synced = upsert_resolutions(paths, resolution_rows)
     return TelegramEntitySyncResult(
         persons_synced=persons_synced,

@@ -17,6 +17,7 @@ from recall.normalize.rebuild import SOURCES
 from recall.normalize.time import day_bounds, event_date, event_datetime
 from recall.storage.jsonl import read_jsonl, write_text_atomic
 from recall.storage.paths import RecallPaths
+from recall.storage.references import normalized_citation, raw_reference, resolve_reference
 from recall.synthesize.timeline import _file_link, _literal
 
 PROMPT = """* Write a daily journal
@@ -299,6 +300,7 @@ def prepare_journal(
 
 
 def _load_packet(directory: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    directory = resolve_reference(directory)
     content = (directory / "packet.json").read_text(encoding="utf-8")
     try:
         packet = json.loads(content)
@@ -313,6 +315,56 @@ def _load_packet(directory: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]
     return packet, read_jsonl(directory / "events.jsonl")
 
 
+def inspect_packet(directory: Path) -> dict[str, Any]:
+    """Verify frozen packet hashes and report current evidence references read-only."""
+    directory = resolve_reference(directory)
+    packet, events = _load_packet(directory)
+    files: dict[Path, dict[str, tuple[int, dict[str, Any]]]] = {}
+    citations = []
+    for event in events:
+        origin = packet.get("event_origins", {}).get(event["event_id"], {})
+        recorded = Path(origin.get("normalized_path", packet["normalized_path"]))
+        physical = resolve_reference(recorded)
+        if physical not in files:
+            records = {}
+            try:
+                with physical.open(encoding="utf-8") as stream:
+                    for number, text in enumerate(stream, 1):
+                        if text.strip():
+                            row = json.loads(text)
+                            records[row["event_id"]] = (number, row)
+            except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+                records = {}
+            files[physical] = records
+        saved = files[physical].get(event["event_id"])
+        line = origin.get("line", saved[0] if saved else None)
+        error = (
+            None if saved and saved == (line, event) else "Normalized citation missing or changed"
+        )
+        raw, raw_error = raw_reference(event, recorded)
+        citations.append(
+            {
+                "event_id": event["event_id"],
+                "normalized_path": str(recorded),
+                "resolved_normalized_path": str(physical),
+                "line": line,
+                "citation_error": error,
+                "resolved_raw_path": str(raw) if raw else None,
+                "raw_citation_error": raw_error,
+            }
+        )
+    return {
+        "packet": str(directory),
+        "packet_sha256": directory.name,
+        "date": packet["date"],
+        "events": len(events),
+        "citations": citations,
+        "unresolved_citations": [
+            row for row in citations if row["citation_error"] or row["raw_citation_error"]
+        ],
+    }
+
+
 def save_journal(
     paths: RecallPaths,
     *,
@@ -325,7 +377,7 @@ def save_journal(
 
     Citation membership is checked, not whether each claim is true. Review the prose.
     """
-    packet_dir = packet_dir.expanduser().resolve()
+    packet_dir = resolve_reference(packet_dir).resolve()
     packet, events = _load_packet(packet_dir)
     if not model.strip():
         raise ValueError("Record the model used to write the draft")
@@ -400,22 +452,28 @@ def save_journal(
             lines.append(prefix + _file_link(packet_dir / "events.jsonl", label, number))
             origin = packet.get("event_origins", {}).get(identity, {})
             if origin:
-                lines.append(
-                    _file_link(
-                        Path(origin["normalized_path"]), "Normalized evidence", origin["line"]
-                    )
+                physical, error = normalized_citation(
+                    Path(origin["normalized_path"]), origin["line"], row
                 )
+                if error:
+                    lines.append(
+                        _literal(f"Unresolved normalized citation: {error} at {physical}").rstrip()
+                    )
+                else:
+                    lines.append(_file_link(physical, "Normalized evidence", origin["line"]))
             reference = row.get("raw_ref")
             if reference:
                 raw = reference["path"]
                 if raw.startswith("local:"):
                     lines.append(_literal(raw + " " + _json(reference["locator"]).strip()).rstrip())
                 else:
-                    original = Path(raw)
-                    if not original.is_absolute():
-                        normalized = origin.get("normalized_path", packet["normalized_path"])
-                        original = Path(normalized).parents[3] / original
-                    if original.is_file():
+                    normalized = origin.get("normalized_path", packet["normalized_path"])
+                    original, error = raw_reference(row, Path(normalized))
+                    if error:
+                        lines.append(
+                            _literal(f"Unresolved raw citation: {error} at {original}").rstrip()
+                        )
+                    elif original is not None:
                         line = reference["locator"].get("line")
                         lines.append(
                             _file_link(

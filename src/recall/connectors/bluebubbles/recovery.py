@@ -14,6 +14,7 @@ from recall.connectors.bluebubbles.capture import (
     append_bluebubbles_envelope,
     local_date_for_timestamp,
 )
+from recall.connectors.bluebubbles.diagnostics import safe_error
 from recall.storage.paths import RecallPaths
 from recall.storage.state import get_connector_cursor
 
@@ -315,6 +316,8 @@ def recover_bluebubbles_messages(
             if len(rows) < page_size:
                 break
             offset += len(rows)
+    except Exception as exc:
+        raise RuntimeError(safe_error(exc)) from None
     finally:
         if owns_client:
             http_client.close()

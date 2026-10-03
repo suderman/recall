@@ -128,7 +128,10 @@ def _preserve_input_downloads(
                     row[field] = previous[field]
                 if row["local_path"] and not Path(row["local_path"]).is_absolute():
                     row["local_path"] = str(inputs.root / row["local_path"])
-                if row["size_bytes"] is None:
+                if (
+                    previous["download_status"] in {"downloaded", "imported"}
+                    or row["size_bytes"] is None
+                ):
                     row["size_bytes"] = previous.get("size_bytes")
 
 

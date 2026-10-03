@@ -140,7 +140,10 @@ def write_artifact_metadata(
         ):
             for field in ("local_path", "checksums", "download_status", "last_error"):
                 row[field] = previous[field]
-            if row["size_bytes"] is None:
+            if (
+                previous["download_status"] in {"downloaded", "imported"}
+                or row["size_bytes"] is None
+            ):
                 row["size_bytes"] = previous.get("size_bytes")
         if previous:
             row["event_ids"] = sorted(set(previous["event_ids"]) | set(row["event_ids"]))

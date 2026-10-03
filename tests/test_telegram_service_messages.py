@@ -190,6 +190,8 @@ def test_service_source_text_is_quoted_in_org_views(tmp_path, content_type):
                 "dates": [DAY],
                 "observed_identity_labels": [],
                 "normalized_path": str(paths.normalized_event_path(DAY)),
+                "resolved_normalized_path": str(paths.normalized_event_path(DAY)),
+                "citation_error": None,
                 "line": 1,
             }
         ],

@@ -393,9 +393,9 @@ def test_normalize_email_reports_next_steps(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         email_cli,
         "normalize_email_day",
-        lambda *args, **kwargs: RecallPaths.from_root(tmp_path).normalized
-        / "2026"
-        / "2026-03-31.jsonl",
+        lambda *args, **kwargs: (
+            RecallPaths.from_root(tmp_path).normalized / "2026" / "2026-03-31.jsonl"
+        ),
     )
 
     result = runner.invoke(
@@ -411,9 +411,9 @@ def test_normalize_calendar_reports_next_steps(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         calendar_cli,
         "normalize_calendar_day",
-        lambda *args, **kwargs: RecallPaths.from_root(tmp_path).normalized
-        / "2026"
-        / "2026-03-31.jsonl",
+        lambda *args, **kwargs: (
+            RecallPaths.from_root(tmp_path).normalized / "2026" / "2026-03-31.jsonl"
+        ),
     )
 
     result = runner.invoke(
@@ -450,7 +450,7 @@ def test_capture_bluebubbles_serve_reports_webhook_url_hint(tmp_path, monkeypatc
 
     assert result.exit_code != 0
     assert (
-        "webhook_url_hint=use http://<recall-host-lan-ip>:8042/bluebubbles/webhook?token=secret"
+        "webhook_url_hint=use http://<recall-host-lan-ip>:8042/bluebubbles/webhook?token=<configured-token>"
         in result.stdout
     )
 
@@ -461,7 +461,10 @@ def test_capture_bluebubbles_serve_reports_recovery_skip_without_server_url(
     config_dir = tmp_path / "config" / "sources"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "bluebubbles.toml").write_text(
-        ('account = "personal"\nwebhook_bind_host = "0.0.0.0"\nwebhook_port = 8042\n'),
+        (
+            'account = "personal"\nwebhook_bind_host = "127.0.0.1"\nwebhook_port = 8042\n'
+            'webhook_token = "secret"\n'
+        ),
         encoding="utf-8",
     )
 
@@ -488,6 +491,7 @@ def test_capture_bluebubbles_serve_runs_startup_recovery(tmp_path, monkeypatch) 
             'account = "personal"\n'
             'webhook_bind_host = "0.0.0.0"\n'
             "webhook_port = 8042\n"
+            'webhook_token = "secret"\n'
             'server_url = "http://10.1.0.9:1234"\n'
             'password_env_var = "BLUEBUBBLES_PASSWORD"\n'
         ),
@@ -738,9 +742,9 @@ def test_normalize_asana_reports_next_steps(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         asana_cli,
         "normalize_asana_day",
-        lambda *args, **kwargs: RecallPaths.from_root(tmp_path).normalized
-        / "2026"
-        / "2026-03-31.jsonl",
+        lambda *args, **kwargs: (
+            RecallPaths.from_root(tmp_path).normalized / "2026" / "2026-03-31.jsonl"
+        ),
     )
 
     result = runner.invoke(

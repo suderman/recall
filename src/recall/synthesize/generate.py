@@ -12,6 +12,7 @@ from typing import Any
 from recall.normalize.rebuild import date_range
 from recall.storage.jsonl import read_jsonl, write_jsonl, write_text_atomic
 from recall.storage.paths import RecallPaths
+from recall.storage.references import resolve_reference
 from recall.synthesize.journal import _load_packet, _sha, _write_once, prepare_journal, save_journal
 
 DEFAULT_MODEL = "codex-lb/gpt-6.1-sol:medium"
@@ -144,6 +145,7 @@ def _fingerprint(packet_dir: Path, model: str, prompt: str) -> str:
 
 
 def _read_revision(revision: Path) -> tuple[dict[str, Any], str]:
+    revision = resolve_reference(revision)
     metadata = (revision.parent / "generation.json").read_text(encoding="utf-8")
     body = (revision.parent / "body.org").read_text(encoding="utf-8")
     content = revision.read_text(encoding="utf-8")
@@ -215,6 +217,7 @@ def publish_journal(
     target = output.expanduser().resolve() / day[:4] / day[5:7] / f"{day}.org"
     roots = [paths.root, *[Path(row["root"]) for row in packet.get("normalized_inputs", [])]]
     roots.append(Path(packet["normalized_path"]).parents[3])
+    roots = [resolve_reference(root) for root in roots]
     if any(target.resolve().is_relative_to((root / "data").resolve()) for root in roots):
         raise ValueError("Publication output must be outside Recall data directories")
     paths.state.mkdir(parents=True, exist_ok=True)

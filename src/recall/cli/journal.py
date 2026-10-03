@@ -14,8 +14,14 @@ from recall.config import resolve_root
 from recall.connectors.slack.api import SlackApiClient
 from recall.connectors.slack.config import load_slack_config
 from recall.storage.paths import RecallPaths
-from recall.synthesize.generate import DEFAULT_MODEL, build_journals, publish_journal
-from recall.synthesize.journal import prepare_journal, save_journal
+from recall.storage.references import resolve_reference
+from recall.synthesize.generate import (
+    DEFAULT_MODEL,
+    _read_revision,
+    build_journals,
+    publish_journal,
+)
+from recall.synthesize.journal import inspect_packet, prepare_journal, save_journal
 from recall.synthesize.run import run_journals
 
 
@@ -137,6 +143,29 @@ def publish(
     typer.echo(f"Revision: {result['revision']}")
 
 
+def inspect(
+    packet: Path | None = typer.Option(None, "--packet"),
+    revision: Path | None = typer.Option(None, "--revision"),
+) -> None:
+    """Check immutable packet/revision hashes and current citations. Never write or call a model."""
+    if (packet is None) == (revision is None):
+        raise typer.BadParameter("Choose exactly one of --packet or --revision")
+    try:
+        if revision is not None:
+            record, _ = _read_revision(revision)
+            packet = Path(record["packet"])
+        assert packet is not None
+        result = inspect_packet(packet)
+        if revision is not None:
+            result["revision"] = str(resolve_reference(revision))
+        typer.echo(json.dumps(result, ensure_ascii=True, indent=2))
+        if result["unresolved_citations"]:
+            raise typer.Exit(1)
+    except (ValueError, OSError, ZoneInfoNotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+
 def prepare(
     day: str = typer.Option(..., "--date"),
     author: str = typer.Option(..., "--author"),
@@ -160,7 +189,7 @@ def prepare(
 
 
 def save(
-    packet: Path = typer.Option(..., "--packet", exists=True, file_okay=False),
+    packet: Path = typer.Option(..., "--packet", file_okay=False),
     draft: Path = typer.Option(..., "--draft", exists=True, dir_okay=False),
     model: str = typer.Option(..., "--model"),
     options: str = typer.Option("{}", "--options", help="Generation options as a JSON object."),

@@ -22,10 +22,14 @@ class TelegramImportResult:
     import_dir: Path
     dates_written: list[str]
     messages_imported: int
+    messages_skipped: int = 0
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Invalid Telegram export JSON at {path}") from exc
 
 
 def _coerce_numeric_id(prefix: str, value: Any) -> int:
@@ -68,6 +72,21 @@ def _content_from_message(message: dict[str, Any], export_root: Path) -> dict[st
     if file_path_value:
         relative_path = Path(str(file_path_value))
         local_path = export_root / relative_path
+        if (
+            relative_path.is_absolute()
+            or ".." in relative_path.parts
+            or not local_path.resolve().is_relative_to(export_root.resolve())
+        ):
+            raise ValueError(
+                f"Telegram export media must stay inside the retained root: {relative_path}"
+            )
+        component = export_root
+        for part in relative_path.parts:
+            component = component / part
+            if component.is_symlink() and component.readlink().is_absolute():
+                raise ValueError(f"Telegram export media has an absolute symlink: {relative_path}")
+        if local_path.exists() and not local_path.is_file():
+            raise ValueError(f"Telegram export media is not a regular file: {relative_path}")
         file_object = {
             "id": _coerce_numeric_id("telegram-export-file", relative_path.as_posix()),
             "local": {
@@ -112,6 +131,8 @@ def _content_from_message(message: dict[str, Any], export_root: Path) -> dict[st
 def _user_record(message: dict[str, Any]) -> dict[str, Any] | None:
     from_name = str(message.get("from") or "").strip()
     from_id = message.get("from_id")
+    if isinstance(from_id, str) and from_id.startswith(("channel", "chat")):
+        return None
     if not from_name and from_id is None:
         return None
     user_id = _coerce_numeric_id("telegram-export-user", from_id or from_name)
@@ -140,6 +161,13 @@ def _envelopes_from_chat(
             continue
         message_id = _coerce_numeric_id("telegram-export-message", message.get("id") or timestamp)
         user = _user_record(message)
+        sender = {"@type": "messageSenderUser", "user_id": user["id"]} if user is not None else None
+        from_id = message.get("from_id")
+        if isinstance(from_id, str) and from_id.startswith(("channel", "chat")):
+            sender = {
+                "@type": "messageSenderChat",
+                "chat_id": _coerce_numeric_id("telegram-export-chat", from_id),
+            }
         payload = {
             "chat": {
                 "id": chat_id,
@@ -149,16 +177,20 @@ def _envelopes_from_chat(
                 "id": message_id,
                 "chat_id": chat_id,
                 "date": int(message.get("date_unixtime") or 0) or None,
-                "sender_id": {
-                    "@type": "messageSenderUser",
-                    "user_id": user["id"]
-                    if user is not None
-                    else _coerce_numeric_id("telegram-export-sender", title),
-                },
+                "sender_id": sender,
                 "content": _content_from_message(message, export_root),
             },
             "users": [user] if user is not None else [],
         }
+        if sender and sender["@type"] == "messageSenderChat":
+            payload["sender_chat"] = {
+                "id": sender["chat_id"],
+                "title": str(message.get("from") or ""),
+            }
+        # Retain explicit references, including targets absent from the bundle.
+        for field in ("reply_to_message_id", "reply_to", "media_album_id", "message_thread_id"):
+            if message.get(field) is not None:
+                payload["message"][field] = message[field]
         envelope = {
             "received_at": timestamp,
             "source": "telegram",
@@ -190,7 +222,7 @@ def _copy_export(source_root: Path, destination: Path) -> None:
             f"Telegram export import already exists at {destination}; "
             "remove it first or use a different export"
         )
-    shutil.copytree(source_root, destination)
+    shutil.copytree(source_root, destination, symlinks=True)
 
 
 def import_telegram_export(
@@ -205,23 +237,44 @@ def import_telegram_export(
         result_path = export_root / "result.json"
         if not result_path.exists():
             matches = sorted(export_root.glob("**/result.json"))
+            if len(matches) > 1:
+                raise ValueError("Unsupported Telegram export: multiple result.json files")
             if matches:
                 result_path = matches[0]
         if not result_path.exists():
             raise FileNotFoundError(f"Telegram export requires result.json in {export_root}")
 
+        if not result_path.resolve().is_relative_to(export_root.resolve()):
+            raise ValueError("Telegram result.json must stay inside the export root")
         result = _load_json(result_path)
+        chats_value = result.get("chats") if isinstance(result, dict) else None
+        chats = chats_value.get("list") if isinstance(chats_value, dict) else None
+        if not isinstance(chats, list) or any(
+            not isinstance(chat, dict) or not isinstance(chat.get("messages"), list)
+            for chat in chats
+        ):
+            raise ValueError(
+                "Unsupported Telegram export shape: expected chats.list with message lists; "
+                "single-chat exports are not supported"
+            )
         import_id = _import_id(export_path, result)
         import_dir = paths.raw_import_dir("telegram", import_id)
+        # Validate the whole input before retaining it or appending any receipts.
+        observed = sum(len(chat["messages"]) for chat in chats)
+        supported = sum(
+            len(
+                _envelopes_from_chat(chat, result_path.parent, account=account, import_id=import_id)
+            )
+            for chat in chats
+        )
+        if observed and not supported:
+            raise ValueError("No importable Telegram messages in nonempty export")
         _copy_export(result_path.parent, import_dir)
 
         dates_written: set[str] = set()
         messages_imported = 0
         export_base = import_dir
-        chats = result.get("chats", {}).get("list") if isinstance(result.get("chats"), dict) else []
-        for chat in chats or []:
-            if not isinstance(chat, dict):
-                continue
+        for chat in chats:
             for date, envelope in _envelopes_from_chat(
                 chat, export_base, account=account, import_id=import_id
             ):
@@ -234,6 +287,7 @@ def import_telegram_export(
             import_dir=import_dir,
             dates_written=sorted(dates_written),
             messages_imported=messages_imported,
+            messages_skipped=observed - supported,
         )
     finally:
         if tempdir is not None:

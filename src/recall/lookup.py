@@ -40,14 +40,48 @@ def _start(index: Path, kind: str, query: str, scope: dict[str, Any]) -> tuple[d
                         labels[identity].update(values)
         except (ValueError, TypeError, KeyError, AttributeError) as exc:
             raise ValueError("Invalid Recall search input metadata; rebuild the index") from exc
+        # Count distinct events, not calendar-day observations of the same event.
+        rows = db.execute(
+            "SELECT e.source,min(d.date),max(d.date),count(DISTINCT e.event_id),"
+            "count(DISTINCT CASE WHEN (? IS NULL OR d.date >= ?) "
+            "AND (? IS NULL OR d.date <= ?) THEN e.event_id END) "
+            "FROM events e JOIN event_dates d ON d.event_id=e.event_id GROUP BY e.source",
+            (scope["from"], scope["from"], scope["to"], scope["to"]),
+        )
+        indexed = {
+            source: {
+                "source": source,
+                "first_date": first,
+                "last_date": last,
+                "events": total,
+                "events_in_scope": scoped,
+            }
+            for source, first, last, total, scoped in rows
+        }
+        selected = sorted(set(scope["sources"]) or indexed)
+        indexed_sources = [
+            indexed.get(
+                source,
+                {
+                    "source": source,
+                    "first_date": None,
+                    "last_date": None,
+                    "events": 0,
+                    "events_in_scope": 0,
+                },
+            )
+            for source in selected
+        ]
     packet = {
         "kind": kind,
         "query": query,
         "scope": scope,
         "index": str(index.resolve()),
         "input_roots": roots,
+        "indexed_sources": indexed_sources,
         "note": "Captured evidence only. Labels do not confirm a person, relationship, "
-        "last real interaction, attendance, or project completion.",
+        "last real interaction, attendance, or project completion. "
+        "Indexed date bounds do not prove complete capture or current source freshness.",
         "_snapshot": before,
     }
     return packet, {key: sorted(values) for key, values in labels.items()}
@@ -134,6 +168,22 @@ def project(
 def render_packet(packet: dict, *, org: bool = False) -> str:
     lines = ["#+TITLE: Recall context", "", "* Recall context"] if org else []
     lines += [_literal(packet["query"]).rstrip(), packet["note"], ""]
+    lines.append("Indexed evidence by source:")
+    if not packet["indexed_sources"]:
+        lines.append("No indexed evidence.")
+    for source in packet["indexed_sources"]:
+        bounds = (
+            f"{source['first_date']} through {source['last_date']}"
+            if source["events"]
+            else "no indexed evidence"
+        )
+        lines.append(
+            _literal(
+                f"{source['source']}: {bounds}; {source['events']} indexed events; "
+                f"{source['events_in_scope']} events in selected date scope."
+            ).rstrip()
+        )
+    lines.append("")
     if packet["kind"] == "person":
         lines.append(f"Matched identities: {packet['matched_identities']}. No candidates merged.")
         if packet["candidates_truncated"]:

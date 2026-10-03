@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from recall.connectors.telegram.capture import parse_date, raw_capture_paths
+from recall.connectors.telegram.export_scope import ExportScope, export_scope
 from recall.entities.enrich import enrich_events_with_people
 from recall.normalize.artifacts import NormalizedArtifact, RemoteLocator
 from recall.normalize.events import NormalizedEvent, RawReference
@@ -65,29 +66,31 @@ def _chat(payload: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _user_identity_id(user_id: int | str) -> str:
-    return f"ident_telegram_user_{user_id}"
+def _user_identity_id(user_id: int | str, scope: ExportScope | None = None) -> str:
+    return scope.identity("user", user_id) if scope else f"ident_telegram_user_{user_id}"
 
 
-def _chat_identity_id(chat_id: int | str) -> str:
-    return f"ident_telegram_chat_{chat_id}"
+def _chat_identity_id(chat_id: int | str, scope: ExportScope | None = None) -> str:
+    return scope.identity("chat", chat_id) if scope else f"ident_telegram_chat_{chat_id}"
 
 
-def _sender_identity_id(message: dict[str, Any]) -> str | None:
+def _sender_identity_id(message: dict[str, Any], scope: ExportScope | None = None) -> str | None:
     sender = message.get("sender_id") or {}
     sender_type = sender.get("@type")
     if sender_type == "messageSenderUser" and sender.get("user_id") is not None:
-        return _user_identity_id(sender["user_id"])
+        return _user_identity_id(sender["user_id"], scope)
     if sender_type == "messageSenderChat" and sender.get("chat_id") is not None:
-        return _chat_identity_id(sender["chat_id"])
+        return _chat_identity_id(sender["chat_id"], scope)
     return None
 
 
-def _participant_identity_ids(payload: dict[str, Any], message: dict[str, Any]) -> list[str]:
+def _participant_identity_ids(
+    payload: dict[str, Any], message: dict[str, Any], scope: ExportScope | None = None
+) -> list[str]:
     chat = _chat(payload)
     identities: set[str] = set()
     for user_id in chat.get("participant_user_ids") or []:
-        identities.add(_user_identity_id(user_id))
+        identities.add(_user_identity_id(user_id, scope))
 
     chat_type_value = chat.get("type")
     chat_type: dict[str, Any] = chat_type_value if isinstance(chat_type_value, dict) else {}
@@ -95,9 +98,9 @@ def _participant_identity_ids(payload: dict[str, Any], message: dict[str, Any]) 
         chat_type.get("@type") in {"chatTypePrivate", "chatTypeSecret"}
         and chat_type.get("user_id") is not None
     ):
-        identities.add(_user_identity_id(chat_type["user_id"]))
+        identities.add(_user_identity_id(chat_type["user_id"], scope))
 
-    sender_identity_id = _sender_identity_id(message)
+    sender_identity_id = _sender_identity_id(message, scope)
     if sender_identity_id is not None:
         identities.add(sender_identity_id)
 
@@ -491,14 +494,8 @@ def normalize_telegram_day(paths: RecallPaths, *, date: str) -> tuple[Path, Path
     artifacts: list[NormalizedArtifact] = []
 
     for row in rows:
-        import_id = None
-        if row.get("capture_mode") == "import":
-            namespace = row.get("import_id")
-            if not isinstance(namespace, str) or not namespace.strip():
-                raise ValueError(
-                    f"Missing Telegram import_id at {updates_path}:{row['_line_number']}"
-                )
-            import_id = namespace
+        scope = export_scope(row, f"{updates_path}:{row['_line_number']}")
+        import_id = scope.import_id if scope else None
         payload_value = row.get("payload")
         payload: dict[str, Any] = payload_value if isinstance(payload_value, dict) else {}
         message = _message(payload)
@@ -525,6 +522,9 @@ def normalize_telegram_day(paths: RecallPaths, *, date: str) -> tuple[Path, Path
             import_id=import_id,
         )
         artifacts.extend(event_artifacts)
+        thread = _thread_id(message)
+        if scope and thread is None and message.get("message_thread_id") not in (None, 0, "0"):
+            thread = f"topic:{message['message_thread_id']}"
         events.append(
             NormalizedEvent(
                 event_id=event_id,
@@ -533,11 +533,11 @@ def normalize_telegram_day(paths: RecallPaths, *, date: str) -> tuple[Path, Path
                 timestamp=timestamp,
                 date=date,
                 kind="message",
-                conversation_id=str(chat_id),
+                conversation_id=scope.conversation(chat_id) if scope else str(chat_id),
                 conversation_label=_conversation_label(payload, message),
-                thread_id=_thread_id(message),
-                sender_identity_id=_sender_identity_id(message),
-                participant_identity_ids=_participant_identity_ids(payload, message),
+                thread_id=(scope.thread(chat_id, thread) if scope else thread),
+                sender_identity_id=_sender_identity_id(message, scope),
+                participant_identity_ids=_participant_identity_ids(payload, message, scope),
                 text=text,
                 source_urls=_source_urls(text),
                 artifact_ids=[artifact.artifact_id for artifact in event_artifacts],

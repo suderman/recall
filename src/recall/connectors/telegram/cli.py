@@ -590,5 +590,8 @@ def import_telegram_export_bundle(
     typer.echo(f"import_id={result.import_id}")
     typer.echo(f"import_dir={result.import_dir}")
     typer.echo(f"messages_imported={result.messages_imported}")
+    typer.echo(f"messages_skipped={result.messages_skipped}")
+    if result.messages_skipped:
+        typer.echo("coverage=partial; inspect retained result.json for skipped records")
     typer.echo("dates_written=" + (",".join(result.dates_written) if result.dates_written else "-"))
     typer.echo("next_step=run 'recall normalize telegram --date YYYY-MM-DD' for each imported date")

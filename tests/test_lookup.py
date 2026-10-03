@@ -173,6 +173,114 @@ def test_read_access_time_is_not_an_index_change(
     assert lookup.project(index, "Roof")["recent"]
 
 
+def test_lookup_exposes_archive_age_even_when_query_has_no_hits(tmp_path: Path) -> None:
+    _, index = workspace(tmp_path)
+    before = index.read_bytes()
+    for function, query in ((lookup.person, "Alex"), (lookup.project, "Roof")):
+        packet = function(index, query, first="2026-09-21", last="2026-09-27")
+        assert packet["indexed_sources"] == [
+            {
+                "source": "email",
+                "first_date": "2026-03-30",
+                "last_date": "2026-03-30",
+                "events": 4,
+                "events_in_scope": 0,
+            }
+        ]
+        for org in (False, True):
+            rendered = lookup.render_packet(packet, org=org)
+            assert "email: 2026-03-30 through 2026-03-30" in rendered
+            assert "0 events in selected date scope" in rendered
+            assert "do not prove complete capture" in rendered
+    packet = lookup.project(index, "No matches")
+    assert packet["recent"] == []
+    assert packet["indexed_sources"][0]["events_in_scope"] == 4
+    assert index.read_bytes() == before
+
+
+def test_indexed_source_bounds_keep_unknown_requested_sources_visible(tmp_path: Path) -> None:
+    _, index = workspace(tmp_path)
+    packet = lookup.project(index, "Roof", sources=["slack", "email", "slack"])
+    assert [row["source"] for row in packet["indexed_sources"]] == ["email", "slack"]
+    assert packet["indexed_sources"][1] == {
+        "source": "slack",
+        "first_date": None,
+        "last_date": None,
+        "events": 0,
+        "events_in_scope": 0,
+    }
+    assert "slack: no indexed evidence" in lookup.render_packet(packet)
+    assert len(lookup.project(index, "Roof", sources=["slack"])["indexed_sources"]) == 1
+    assert (
+        lookup.project(index, "Roof", first="2026-03-30")["indexed_sources"][0]["events_in_scope"]
+        == 4
+    )
+    assert (
+        lookup.project(index, "Roof", last="2026-03-29")["indexed_sources"][0]["events_in_scope"]
+        == 0
+    )
+
+
+def test_indexed_bounds_use_observed_calendar_days_not_only_winning_partition(
+    tmp_path: Path,
+) -> None:
+    paths, index = workspace(tmp_path)
+    calendar = {
+        "event_id": "calendar_fixture",
+        "source": "calendar",
+        "kind": "calendar_event",
+        "timestamp": "2026-03-30T10:00:00Z",
+        "text": "Roof meeting",
+        "raw_ref": {},
+    }
+    for day in ("2026-03-29", "2026-03-30", "2026-03-31"):
+        path = paths.normalized_event_path(day)
+        rows = (
+            [json.loads(line) for line in path.read_text().splitlines() if line]
+            if path.exists()
+            else []
+        )
+        rows.append({**calendar, "date": day})
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    build_index([paths])
+    packet = lookup.project(index, "Roof", first="2026-03-29", last="2026-03-30")
+    assert packet["indexed_sources"][0] == {
+        "source": "calendar",
+        "first_date": "2026-03-29",
+        "last_date": "2026-03-31",
+        "events": 1,
+        "events_in_scope": 1,
+    }
+    assert packet["indexed_sources"][1]["events_in_scope"] == 4
+
+
+def test_cli_packets_and_org_report_source_age_without_executing_source_text(
+    tmp_path: Path,
+) -> None:
+    paths, index = workspace(tmp_path)
+    with sqlite3.connect(index) as db:
+        db.execute("UPDATE events SET source=?", ("email\n#+begin_src\n* Forged",))
+    for kind, query in (("person", "Alex"), ("project", "Roof")):
+        args = [
+            "search",
+            kind,
+            query,
+            "--root",
+            str(paths.root),
+            "--from",
+            "2026-09-21",
+            "--to",
+            "2026-09-27",
+        ]
+        result = CliRunner().invoke(app, [*args, "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["indexed_sources"][0]["events_in_scope"] == 0
+        org = CliRunner().invoke(app, [*args, "--org"])
+        assert org.exit_code == 0, org.output
+        assert "\n#+begin_src" not in org.output and "\n* Forged" not in org.output
+
+
 def test_corrupt_metadata_requests_rebuild(tmp_path: Path) -> None:
     _, index = workspace(tmp_path)
     with sqlite3.connect(index) as db:

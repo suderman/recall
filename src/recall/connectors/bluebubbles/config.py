@@ -10,7 +10,7 @@ from recall.storage.paths import RecallPaths
 @dataclass(frozen=True, slots=True)
 class BlueBubblesSourceConfig:
     account: str = "personal"
-    webhook_bind_host: str = "0.0.0.0"
+    webhook_bind_host: str = "127.0.0.1"
     webhook_port: int = 8042
     webhook_token: str | None = None
     server_url: str | None = None
@@ -31,7 +31,7 @@ def load_bluebubbles_config(paths: RecallPaths) -> BlueBubblesSourceConfig:
     webhook_token = data.get("webhook_token")
     return BlueBubblesSourceConfig(
         account=str(data.get("account", "personal")),
-        webhook_bind_host=str(data.get("webhook_bind_host", "0.0.0.0")),
+        webhook_bind_host=str(data.get("webhook_bind_host", "127.0.0.1")),
         webhook_port=int(data.get("webhook_port", 8042)),
         webhook_token=str(webhook_token) if webhook_token else None,
         server_url=str(data.get("server_url")) if data.get("server_url") else None,

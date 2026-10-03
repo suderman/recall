@@ -192,6 +192,25 @@ Guidelines:
 - local mirrors must not overwrite or replace original remote/source locators
 - if bytes are not downloaded, artifact metadata may still exist with status such as `not_requested`, `deferred`, or `failed`
 
+### 6.5 Relocated evidence references
+
+An explicit `RECALL_RELOCATION_MAP` may point readers to a retained JSON list of
+absolute `old` and `new` paths. The most specific path mapping is authoritative.
+Readers preserve recorded references and immutable hashes; they do not rewrite
+raw or normalized evidence, packets, revisions, journals, or indexes.
+
+Search results report resolved normalized and raw paths separately from recorded
+provenance. A normalized citation is valid only when the complete indexed event
+matches the same physical line. Missing, unreadable or changed evidence must be
+reported without a valid-looking link. Packet and revision readers still verify
+the original content hashes after resolving their locations. The read-only
+`journal inspect` command reports unresolved references and exits nonzero for
+them. Hash and citation checks do not establish factual truth.
+
+Private candidate indexes may be rebuilt from explicitly selected current input
+roots. Canonical index replacement and historical migration remain separate
+operations, not side effects of reading relocated evidence.
+
 ## 7. Normalized event contract
 
 The normalized event model must be broad enough to support messages, emails, meetings, tasks, imported posts, and later other event types.
@@ -326,6 +345,22 @@ If Recall downloads source-native attachment bytes:
 - record checksums when available
 - treat local mirrors as additive archive material, not canonical replacements
 
+Local byte replacement stages a complete file beside the destination, flushes
+it, records its SHA-256 and actual size, and atomically replaces the destination.
+Failed acquisition or replacement keeps the previous bytes, path, status, size
+and checksums; `last_error` records the failed attempt. Same-file copies must not
+truncate their input.
+
+Without `--force`, acquired or existing local bytes are checked before reuse.
+Missing or unreadable bytes, a missing SHA-256, or a size/checksum mismatch count
+as failures, not valid cache hits. A missing size is allowed when SHA-256 matches;
+a recorded size must match. Evidence remains in place and no remote repair is
+attempted. Telegram preflight must not initialize TDLib to repair these entries.
+BlueBubbles imported bytes follow the same rules. Dry runs report failure counts
+without changing metadata. Only an explicit source-native forced acquisition
+requests replacement. Normalization and replay preserve acquired integrity
+metadata rather than replacing actual byte size with a source observation.
+
 ### 8.7 Metadata-first policy
 Implementation order should be:
 1. artifact metadata capture
@@ -429,6 +464,16 @@ These should import archives into raw storage and then normalize from there.
 - local persistent database
 - append raw updates/messages
 - normalize downstream
+- Desktop collection exports use their retained account/import-ID scope for
+  people, identities, conversations and threads; native keys are unchanged
+- export identity kinds and values are scoped, including usernames and phones;
+  equal numeric keys or labels never create automatic human resolutions
+- export person records are unlinked observations; explicit manual resolutions
+  establish ownership, and later sync preserves manual state
+- export media must stay inside the retained root, with no absolute paths,
+  parent traversal or escaping symlinks; missing media never uses TDLib fallback
+- unsupported input layouts and wholly unsupported nonempty exports fail before
+  import; partial imports report skipped records and retain the original JSON
 
 ### 11.3 BlueBubbles
 - always-on webhook receiver

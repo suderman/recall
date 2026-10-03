@@ -19,7 +19,9 @@ from recall.storage.db import (
 from recall.storage.paths import RecallPaths
 
 
-def upsert_persons(paths: RecallPaths, records: Iterable[dict[str, Any]]) -> int:
+def upsert_persons(
+    paths: RecallPaths, records: Iterable[dict[str, Any]], *, preserve_existing: bool = False
+) -> int:
     rows = list(records)
     if not rows:
         return 0
@@ -34,6 +36,9 @@ def upsert_persons(paths: RecallPaths, records: Iterable[dict[str, Any]]) -> int
             if tags is not None:
                 payload["tags_json"] = json.dumps(tags)
             statement = sqlite_insert(persons).values(**payload)
+            if preserve_existing:
+                connection.execute(statement.on_conflict_do_nothing())
+                continue
             statement = statement.on_conflict_do_update(
                 index_elements=[persons.c.person_id],
                 set_={
@@ -48,7 +53,9 @@ def upsert_persons(paths: RecallPaths, records: Iterable[dict[str, Any]]) -> int
     return len(rows)
 
 
-def upsert_identities(paths: RecallPaths, records: Iterable[dict[str, Any]]) -> int:
+def upsert_identities(
+    paths: RecallPaths, records: Iterable[dict[str, Any]], *, preserve_existing: bool = False
+) -> int:
     rows = list(records)
     if not rows:
         return 0
@@ -59,6 +66,9 @@ def upsert_identities(paths: RecallPaths, records: Iterable[dict[str, Any]]) -> 
     with engine.begin() as connection:
         for row in rows:
             statement = sqlite_insert(identities).values(**row)
+            if preserve_existing:
+                connection.execute(statement.on_conflict_do_nothing())
+                continue
             statement = statement.on_conflict_do_update(
                 index_elements=[identities.c.source, identities.c.kind, identities.c.value],
                 set_={

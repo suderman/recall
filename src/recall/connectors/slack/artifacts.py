@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +7,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from recall.storage.blobs import cache_error, replace_blob
 from recall.storage.jsonl import read_jsonl, write_jsonl
 from recall.storage.paths import RecallPaths
 
@@ -78,25 +78,38 @@ def download_slack_artifacts(
 
     try:
         for artifact in artifacts:
-            artifact["download_status"] = artifact.get("download_status") or "not_requested"
+            current_status = artifact.get("download_status") or "not_requested"
+            artifact["download_status"] = current_status
+            blob_path = _blob_path(paths, source="slack", date=date, artifact=artifact)
+            if (
+                current_status in {"downloaded", "imported"}
+                or artifact.get("local_path")
+                or blob_path.exists()
+            ) and not force:
+                cached_path = paths.root / (artifact.get("local_path") or str(blob_path))
+                error = cache_error(cached_path, artifact)
+                artifact["last_error"] = error
+                if error:
+                    failed += 1
+                else:
+                    skipped_existing += 1
+                continue
             locator = _choose_download_locator(artifact)
             if policy != "download-source-native":
-                artifact["download_status"] = "not_requested"
+                artifact["download_status"] = (
+                    current_status
+                    if current_status in {"downloaded", "imported"}
+                    else "not_requested"
+                )
                 artifact["last_error"] = None
                 skipped_policy += 1
                 continue
 
             if locator is None:
-                artifact["download_status"] = "not_available"
+                if current_status not in {"downloaded", "imported"}:
+                    artifact["download_status"] = "not_available"
                 artifact["last_error"] = "No source-native downloadable locator found"
                 failed += 1
-                continue
-
-            blob_path = _blob_path(paths, source="slack", date=date, artifact=artifact)
-            if blob_path.exists() and artifact.get("download_status") == "downloaded" and not force:
-                artifact["local_path"] = paths.relative_to_root(blob_path)
-                artifact["last_error"] = None
-                skipped_existing += 1
                 continue
 
             would_download += 1
@@ -104,31 +117,23 @@ def download_slack_artifacts(
                 artifact["last_error"] = None
                 continue
 
-            blob_path.parent.mkdir(parents=True, exist_ok=True)
-            checksum = hashlib.sha256()
-
             try:
                 response = http_client.get(
                     locator,
                     headers={"Authorization": f"Bearer {token}"},
                 )
                 response.raise_for_status()
-                with blob_path.open("wb") as handle:
-                    for chunk in response.iter_bytes():
-                        if not chunk:
-                            continue
-                        handle.write(chunk)
-                        checksum.update(chunk)
+                checksum, size = replace_blob(blob_path, response.iter_bytes())
             except Exception as exc:
                 failed += 1
-                artifact["download_status"] = "failed"
+                if current_status not in {"downloaded", "imported"}:
+                    artifact["download_status"] = "failed"
                 artifact["last_error"] = str(exc)
-                if blob_path.exists():
-                    blob_path.unlink()
                 continue
 
             artifact["local_path"] = paths.relative_to_root(blob_path)
-            artifact["checksums"] = {"sha256": checksum.hexdigest()}
+            artifact["checksums"] = {"sha256": checksum}
+            artifact["size_bytes"] = size
             artifact["download_status"] = "downloaded"
             artifact["last_error"] = None
             downloaded += 1

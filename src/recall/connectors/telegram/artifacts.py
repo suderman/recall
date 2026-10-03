@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -8,8 +7,10 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from recall.connectors.telegram.normalize import _file_details, _message
+from recall.storage.blobs import cache_error, replace_blob
 from recall.storage.jsonl import read_jsonl, write_jsonl
 from recall.storage.paths import RecallPaths
+from recall.storage.references import resolve_reference
 
 SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -81,7 +82,11 @@ def _remote_id(artifact: dict[str, Any]) -> str | None:
     return None
 
 
-def _native_artifact_ids(paths: RecallPaths, artifacts: list[dict[str, Any]]) -> set[str]:
+def _native_artifact_ids(
+    paths: RecallPaths,
+    artifacts: list[dict[str, Any]],
+    export_roots: dict[str, Path | None] | None = None,
+) -> set[str]:
     # Read each referenced capture once, retaining physical line numbers.
     references: dict[Path, dict[int, list[dict[str, Any]]]] = {}
     for artifact in artifacts:
@@ -96,7 +101,7 @@ def _native_artifact_ids(paths: RecallPaths, artifacts: list[dict[str, Any]]) ->
             continue
         if type(line) is not int or line < 1:
             continue
-        path = paths.root / raw["path"]
+        path = resolve_reference(paths.root / raw["path"])
         references.setdefault(path, {}).setdefault(line, []).append(artifact)
 
     native: set[str] = set()
@@ -115,6 +120,20 @@ def _native_artifact_ids(paths: RecallPaths, artifacts: list[dict[str, Any]]) ->
                             continue
                         mode = row.get("capture_mode")
                         if row.get("source") != "telegram" or not isinstance(mode, str):
+                            continue
+                        if mode == "import" and export_roots is not None:
+                            for artifact in lines[number]:
+                                export_roots[artifact["artifact_id"]] = None
+                            import_id = row.get("import_id")
+                            if isinstance(import_id, str) and import_id.strip():
+                                imports = path.parent.parent / "imports"
+                                root = (imports / import_id).resolve()
+                                if (
+                                    root.is_relative_to(imports.resolve())
+                                    and root != imports.resolve()
+                                ):
+                                    for artifact in lines[number]:
+                                        export_roots[artifact["artifact_id"]] = root
                             continue
                         if mode not in modes:
                             continue
@@ -150,25 +169,21 @@ def telegram_artifacts_need_tdlib(paths: RecallPaths, *, date: str, force: bool 
     return any(
         artifact["artifact_id"] in native
         and _choose_local_source_path(artifact) is None
-        and not (
-            not force
-            and artifact.get("download_status") == "downloaded"
-            and _blob_path(paths, date=date, artifact=artifact).exists()
+        and (
+            force
+            or not (
+                artifact.get("download_status") in {"downloaded", "imported"}
+                or artifact.get("local_path")
+                or _blob_path(paths, date=date, artifact=artifact).exists()
+            )
         )
         for artifact in artifacts
     )
 
 
-def _copy_with_checksum(source_path: Path, destination_path: Path) -> str:
-    checksum = hashlib.sha256()
-    with source_path.open("rb") as source_handle, destination_path.open("wb") as destination_handle:
-        while True:
-            chunk = source_handle.read(1024 * 1024)
-            if not chunk:
-                break
-            destination_handle.write(chunk)
-            checksum.update(chunk)
-    return checksum.hexdigest()
+def _copy_with_checksum(source_path: Path, destination_path: Path) -> tuple[str, int]:
+    with source_path.open("rb") as source_handle:
+        return replace_blob(destination_path, iter(lambda: source_handle.read(1024 * 1024), b""))
 
 
 def download_telegram_artifacts(
@@ -185,9 +200,10 @@ def download_telegram_artifacts(
         raise FileNotFoundError(f"No artifact metadata file found at {artifact_path}")
 
     artifacts = read_jsonl(artifact_path)
+    export_roots: dict[str, Path | None] = {}
     native = (
-        _native_artifact_ids(paths, artifacts)
-        if policy == "download-source-native" and not dry_run
+        _native_artifact_ids(paths, artifacts, export_roots)
+        if policy == "download-source-native"
         else set()
     )
     would_download = 0
@@ -197,26 +213,52 @@ def download_telegram_artifacts(
     failed = 0
 
     for artifact in artifacts:
-        artifact["download_status"] = artifact.get("download_status") or "not_requested"
+        current_status = artifact.get("download_status") or "not_requested"
+        artifact["download_status"] = current_status
+        blob_path = _blob_path(paths, date=date, artifact=artifact)
+        if (
+            current_status in {"downloaded", "imported"}
+            or artifact.get("local_path")
+            or blob_path.exists()
+        ) and not force:
+            cached_path = paths.root / (artifact.get("local_path") or str(blob_path))
+            error = cache_error(cached_path, artifact)
+            artifact["last_error"] = error
+            if error:
+                failed += 1
+            else:
+                skipped_existing += 1
+            continue
         if policy != "download-source-native":
-            artifact["download_status"] = "not_requested"
+            artifact["download_status"] = (
+                current_status if current_status in {"downloaded", "imported"} else "not_requested"
+            )
             artifact["last_error"] = None
             skipped_policy += 1
             continue
 
-        blob_path = _blob_path(paths, date=date, artifact=artifact)
-        if blob_path.exists() and artifact.get("download_status") == "downloaded" and not force:
-            artifact["local_path"] = paths.relative_to_root(blob_path)
-            artifact["last_error"] = None
-            skipped_existing += 1
+        source_path = _choose_local_source_path(artifact)
+        export_root = export_roots.get(artifact["artifact_id"])
+        if (
+            source_path is not None
+            and artifact["artifact_id"] in export_roots
+            and (
+                export_root is None
+                or not source_path.resolve().is_relative_to(export_root)
+                or not source_path.is_file()
+            )
+        ):
+            failed += 1
+            artifact["last_error"] = (
+                "Telegram export media is outside the retained root or not a file"
+            )
+            if current_status not in {"downloaded", "imported"}:
+                artifact["download_status"] = "not_available"
             continue
-
         would_download += 1
         if dry_run:
             artifact["last_error"] = None
             continue
-
-        source_path = _choose_local_source_path(artifact)
         tdlib_errors: list[str] = []
         if source_path is None and artifact["artifact_id"] in native:
             source_object_id = str(artifact.get("source_object_id") or "").strip()
@@ -254,7 +296,8 @@ def download_telegram_artifacts(
                                 source_path = candidate
 
         if source_path is None:
-            artifact["download_status"] = "not_available"
+            if current_status not in {"downloaded", "imported"}:
+                artifact["download_status"] = "not_available"
             artifact["last_error"] = (
                 "; ".join(tdlib_errors)
                 if tdlib_errors
@@ -269,19 +312,18 @@ def download_telegram_artifacts(
             failed += 1
             continue
 
-        blob_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            checksum = _copy_with_checksum(source_path, blob_path)
+            checksum, size = _copy_with_checksum(source_path, blob_path)
         except Exception as exc:
             failed += 1
-            artifact["download_status"] = "failed"
+            if current_status not in {"downloaded", "imported"}:
+                artifact["download_status"] = "failed"
             artifact["last_error"] = str(exc)
-            if blob_path.exists():
-                blob_path.unlink()
             continue
 
         artifact["local_path"] = paths.relative_to_root(blob_path)
         artifact["checksums"] = {"sha256": checksum}
+        artifact["size_bytes"] = size
         artifact["download_status"] = "downloaded"
         artifact["last_error"] = None
         downloaded += 1

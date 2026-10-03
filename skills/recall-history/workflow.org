@@ -63,12 +63,21 @@ Quoted reminders do not establish completion. These commands do not reconcile
 cancellations into a current calendar or create tasks.
 
 ** Ground the answer
-For every concrete claim, cite the returned =normalized_path= plus physical
-=line= and identify the event's date/source. Use a clickable file link where the
-current interface supports it. Keep =event_id= available for follow-up; do not
-make the user read IDs in the main explanation. =raw_ref= gives original-file
-references or calendar locators if deeper checking is needed. Org packets can
-be requested with =--org= instead of =--json= for Emacs review.
+For every concrete claim, check =citation_error=, then cite the returned
+=resolved_normalized_path= plus physical =line= and identify the event's
+date/source. The recorded =normalized_path= remains provenance, even when a
+workspace has moved. Use a clickable file link where the current interface
+supports it. Keep =event_id= available for follow-up; do not make the user read
+IDs in the main explanation.
+
+Do not present a broken citation as verified evidence. Report =citation_error=
+and =raw_citation_error= when present. Use =resolved_raw_path= for an original
+file only when =raw_citation_error= is null; =raw_ref= retains the original
+locator, including local calendar references. An explicitly supplied
+=RECALL_RELOCATION_MAP= lets readers resolve retained old/new paths without
+rewriting evidence or rebuilding the index. Do not invent mappings or change
+canonical state to hide a failed reference. Org packets can be requested with
+=--org= instead of =--json= for Emacs review.
 
 Inspect just the relevant returned evidence before claiming what someone asked,
 what was done, or how the user knows a contact. Snippets may omit qualifications.
@@ -77,9 +86,13 @@ as "last captured exchange", not "the last time you talked". A participant ID
 can appear in indirect messages; check actual sender, recipients, and thread
 context before calling it a direct exchange.
 
-Say what is uncertain and what evidence is missing. Input roots and result dates
-show scope, not complete capture. A freshly rebuilt index can still contain old
-evidence. Do not answer a current or future obligation question as if an archive
+Say what is uncertain and what evidence is missing. Person/project packets have
+=indexed_sources= with per-source =first_date=, =last_date=, distinct =events=
+and =events_in_scope= for the requested dates, independent of the query words.
+Check these bounds even when there are no matches. Requested sources without
+indexed evidence have null dates and zero counts. Bounds show indexed evidence,
+not complete capture. A freshly rebuilt index can still contain old evidence.
+Do not answer a current or future obligation question as if an archive
 ending months earlier is a live inbox/calendar. Mention that limitation and,
 when appropriate, request an explicitly approved current-source check.
 

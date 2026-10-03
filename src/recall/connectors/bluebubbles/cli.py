@@ -12,6 +12,7 @@ from recall.connectors.bluebubbles.config import (
     bluebubbles_config_path,
     load_bluebubbles_config,
 )
+from recall.connectors.bluebubbles.diagnostics import safe_error
 from recall.connectors.bluebubbles.entities import (
     sync_bluebubbles_entities as sync_bluebubbles_entities_for_date,
 )
@@ -64,6 +65,8 @@ def serve_bluebubbles(
     paths = _paths_for(root)
     paths.ensure_directories()
     config = load_bluebubbles_config(paths)
+    if not config.webhook_token:
+        raise typer.BadParameter("Configure webhook_token before serving BlueBubbles webhooks")
     if skip_recovery:
         typer.echo("recovery_status=skipped")
         typer.echo("recovery_reason=disabled_by_flag")
@@ -75,7 +78,7 @@ def serve_bluebubbles(
             config=config,
         )
     app = create_bluebubbles_webhook_app(paths, config)
-    token_hint = f"?token={config.webhook_token}" if config.webhook_token else ""
+    token_hint = "?token=<configured-token>"
     typer.echo("mode=webhook")
     typer.echo(f"bind={config.webhook_bind_host}:{config.webhook_port}")
     typer.echo(f"endpoint=/bluebubbles/webhook{token_hint}")
@@ -84,7 +87,8 @@ def serve_bluebubbles(
         f"{config.webhook_port}/bluebubbles/webhook{token_hint} from the BlueBubbles server"
     )
     typer.echo(f"config={bluebubbles_config_path(paths)}")
-    uvicorn.run(app, host=config.webhook_bind_host, port=config.webhook_port)
+    # Query-string authentication must not reach Uvicorn access logs.
+    uvicorn.run(app, host=config.webhook_bind_host, port=config.webhook_port, access_log=False)
 
 
 def _run_startup_recovery(
@@ -116,7 +120,7 @@ def _run_startup_recovery(
         )
     except Exception as exc:
         typer.echo("recovery_status=failed")
-        typer.echo(f"recovery_error={exc}")
+        typer.echo(f"recovery_error={safe_error(exc)}")
         return
 
     typer.echo("recovery_status=ok")

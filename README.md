@@ -308,8 +308,14 @@ explicitly want Recall to download source-native Slack file objects.
 
 Configure BlueBubbles capture by copying `config/sources/bluebubbles.toml.example`
 to `config/sources/bluebubbles.toml`, then point the BlueBubbles server at the
-Recall webhook URL on your LAN. Use the Recall host's reachable LAN IP, not
-`0.0.0.0`, for example `http://10.1.0.6:8042/bluebubbles/webhook?token=...`.
+Recall webhook URL. The default bind is `127.0.0.1`; LAN access requires an
+explicit `webhook_bind_host` and appropriate network protection. Set a private
+`webhook_token` before serving. Requests without the configured token are rejected,
+even on loopback. Startup hints use `<configured-token>`, never the token itself,
+and Uvicorn access logging is disabled to keep query tokens out of its logs.
+Reverse proxies must also avoid logging token-bearing query strings. For LAN
+access, use the Recall host's reachable IP, not `0.0.0.0`, for example
+`http://10.1.0.6:8042/bluebubbles/webhook?token=...`.
 If `server_url` and the configured password environment variable are set,
 Recall now attempts a bounded short-gap recovery on startup before the webhook
 receiver begins serving.
@@ -531,7 +537,9 @@ Telegram artifact downloads copy available local files without starting TDLib.
 TDLib fallback requires a retained raw reference to a native capture record for
 the same account. Missing export files and unproved source records become
 `not_available`; synthetic export file keys never reach numeric or remote-ID
-fallback. Dry runs do not initialize TDLib or write metadata or blobs.
+fallback. Export media must resolve inside its retained bundle, including when
+reading older imported locators. Dry runs do not initialize TDLib or write
+metadata or blobs.
 
 ## Inspect repeated source records
 
@@ -564,6 +572,35 @@ normalizer uses the retained import ID, not a moved export path, and rejects
 missing, non-string or blank import IDs before publishing records. This separates
 bundles and native messages without claiming Desktop/TDLib equivalence.
 
+Export people, user/chat identities, conversations and thread references also
+use the exact `(account, import_id)` scope. Their key is SHA-256's first 20 hex
+characters over compact UTF-8 JSON
+`["telegram-export-entity-v1", account, import_id, kind, ...string_key_parts]`.
+Persons use `person_telegram_export_`; identities use
+`ident_telegram_export_KIND_`; conversations and threads use `telegram-export:`.
+Threads include their reference kind, chat key and target key, even if the
+referenced message is absent. Native keys remain unchanged.
+
+Export identity kinds are `export_user`, `export_chat`, `export_username` and
+`export_phone`. Their values contain the scoped JSON, so SQLite's identity
+uniqueness rule cannot merge bundles. Labels and handles remain observations.
+Export person rows are tagged `telegram_export_observation` and are not linked
+to identities automatically. Numeric keys and names do not prove human ownership
+or native Telegram equivalence. Export sync preserves existing person and
+identity records, including manual state. Explicit manual resolutions can link
+scoped identities across bundles or to native people. Missing senders remain
+missing; channel senders use chat identities, not person records.
+
+The importer supports collection exports with `chats.list`, including empty
+collections. Single-chat exports and malformed layouts are rejected clearly.
+A nonempty export with no supported messages fails before retaining or appending
+it. Partial imports print `messages_skipped` and a coverage warning; skipped
+records remain in the unchanged retained `result.json`. Supported media paths
+must be relative, without parent traversal, and stay within the retained root.
+Outside-root and absolute symlinks are rejected. Relative internal symlinks are
+retained without dereferencing them during import. Missing media remains missing
+metadata, never a reason to request TDLib replacements.
+
 The `normalization_collisions` list reports shared current event IDs across audit
 namespaces, not legacy IDs already in storage. It includes every observation under
 each namespace. These warnings do not prove that messages are equivalent. The
@@ -572,8 +609,10 @@ read-only command does not change IDs or migrate stored records.
 Replay old imports into a fresh workspace before building a new index or journal
 packet. In-place normalization can leave old event and artifact IDs behind. New
 import IDs must not inherit old acquired bytes or checksums solely through an old
-ID match. Preserve old artifacts, packets and journals; ID isolation does not
-rewrite historical citations or migrate canonical data.
+ID match. Corrected export entity and conversation references also require a
+fresh replay. Preserve old artifacts, packets and journals; namespace changes
+do not rewrite historical citations or migrate canonical data. Prepare reference
+mappings and get approval before publishing a replay or changing entities.
 
 Isolated rebuilds process capture days in sorted order and records in physical
 line order. For one event ID on one output day, the last processed observation
@@ -711,6 +750,39 @@ The index lives under `data/derived/`; it is not the primary event store. Org
 notes and journal text can still be searched in Emacs. They are not imported
 into this evidence index. There is no web UI or natural-language search service.
 
+### Read relocated evidence
+
+For archived workspaces moved without rewriting their contents, set
+`RECALL_RELOCATION_MAP` to a retained JSON list of absolute `old` and `new` paths:
+
+```bash
+RECALL_RELOCATION_MAP=/path/to/moves.json recall search query "client name" --json
+RECALL_RELOCATION_MAP=/path/to/moves.json recall journal inspect --packet /old/path/to/packet
+RECALL_RELOCATION_MAP=/path/to/moves.json recall journal inspect --revision /old/path/to/journal.org
+```
+
+The most specific mapping wins, even if something recreates the old path.
+Without this explicit setting, readers do not guess alternate locations. An
+invalid map stops the read. Search, person/project results, packet readers and
+newly rendered evidence links use the map without changing archived JSON,
+packet hashes, revisions, journals or the existing index.
+
+Search JSON keeps the recorded `normalized_path` and adds
+`resolved_normalized_path`, `resolved_raw_path`, `citation_error` and
+`raw_citation_error`. Each normalized citation must match the complete stored
+event at its physical line. Missing or changed evidence produces a visible
+error, not an apparently valid file link. Use resolved paths only when their
+error fields are null.
+
+`journal inspect` checks packet hashes and, for revisions, body and revision
+hashes. It reports current normalized and raw citations, exits nonzero for
+unresolved citations, and never writes or calls a model. Valid hashes and links
+do not prove that a journal's claims are true.
+
+To test a fresh index, use a private primary root and explicitly include the
+current physical input roots with `search index --include-root`. Do not replace
+the canonical index or rewrite immutable artifacts merely to update paths.
+
 ## Recall person or project context
 
 ```bash
@@ -724,6 +796,15 @@ identities separate, returns first/latest captured evidence and bounded recent
 history, and reports ambiguous names. Broad names show at most 20 candidates;
 choose `--identity` to inspect one. A name found only in message text is returned
 as an unlinked mention, never used to identify the sender or participant.
+
+Person and project packets include `indexed_sources`. Each source has indexed
+`first_date`, `last_date`, distinct `events` and `events_in_scope` for the selected
+dates. These counts ignore the queried name or project words. Text and Org output
+show the same bounds, even when the query has no matches. Requested sources with
+no indexed evidence remain visible with null dates and zero counts. Calendar
+bounds include every retained observed day without counting one event twice.
+An empty recent query against an old archive is not proof that nothing happened.
+Index bounds do not prove complete capture or current source freshness.
 
 Replay retains labels for published identities under
 `data/state/rebuild/identity-labels.jsonl`. The search index combines these with

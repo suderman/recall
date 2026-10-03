@@ -18,6 +18,7 @@ from recall.entities.observations import LABELS_PATH
 from recall.entities.observations import observed_labels as read_identity_labels
 from recall.normalize.time import event_datetime
 from recall.storage.paths import RecallPaths
+from recall.storage.references import normalized_citation, raw_reference
 from recall.synthesize.timeline import _file_link, _literal
 
 FORMAT = "recall-search-v1"
@@ -269,10 +270,16 @@ def search(
             days = connection.execute(
                 "SELECT date FROM event_dates WHERE event_id=? ORDER BY date", (event["event_id"],)
             )
+            normalized, citation_error = normalized_citation(Path(path), line, event)
+            raw, raw_error = raw_reference(event, Path(path))
             results.append(
                 {
                     "event": event,
                     "normalized_path": path,
+                    "resolved_normalized_path": str(normalized),
+                    "citation_error": citation_error,
+                    "resolved_raw_path": str(raw) if raw is not None else None,
+                    "raw_citation_error": raw_error,
                     "line": line,
                     "observed_identity_labels": labels.splitlines(),
                     "snippet": excerpt,
@@ -312,18 +319,29 @@ def render_results(
                     "Observed labels: " + ", ".join(result["observed_identity_labels"])
                 ).rstrip()
             )
-        path = Path(result["normalized_path"])
-        lines.append(
-            _file_link(path, "Normalized evidence", result["line"])
-            if org
-            else (f"Evidence: {path}:{result['line']}")
-        )
+        path = Path(result["resolved_normalized_path"])
+        if result["citation_error"]:
+            lines.append(
+                _literal(
+                    "Unresolved normalized citation: "
+                    + result["citation_error"]
+                    + f" at {path}:{result['line']}"
+                ).rstrip()
+            )
+        else:
+            lines.append(
+                _file_link(path, "Normalized evidence", result["line"])
+                if org
+                else (f"Evidence: {path}:{result['line']}")
+            )
         raw = event.get("raw_ref") or {}
         if raw.get("path"):
-            raw_path = Path(raw["path"])
-            if not raw_path.is_absolute():
-                raw_path = path.parents[3] / raw_path
-            if raw_path.is_file():
+            raw_path, raw_error = raw_reference(event, Path(result["normalized_path"]))
+            if raw_error:
+                lines.append(
+                    _literal(f"Unresolved raw citation: {raw_error} at {raw_path}").rstrip()
+                )
+            elif raw_path is not None:
                 locator = (raw.get("locator") or {}).get("line")
                 lines.append(
                     _file_link(

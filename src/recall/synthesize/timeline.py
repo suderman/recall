@@ -14,6 +14,7 @@ from recall.normalize.rebuild import SOURCES, date_range, file_hash
 from recall.normalize.time import event_datetime
 from recall.storage.jsonl import read_jsonl, write_jsonl, write_text_atomic
 from recall.storage.paths import RecallPaths
+from recall.storage.references import raw_reference, resolve_reference
 
 
 def _literal(value: Any) -> str:
@@ -130,16 +131,14 @@ def render_day(
                     _literal(raw + "; use the locator to find the local occurrence.").rstrip()
                 )
             else:
-                path = Path(raw)
-                if not path.is_absolute():
-                    path = paths.root / path
-                if path.is_file():
+                path, error = raw_reference(row, event_path)
+                if path is not None and not error:
                     line = locator.get("line")
                     lines.append(
                         _file_link(path, "Raw evidence", line if isinstance(line, int) else None)
                     )
                 else:
-                    lines.append("Raw evidence file is unavailable.")
+                    lines.append(_literal(f"Unresolved raw citation: {error} at {path}").rstrip())
         for artifact_id in row.get("artifact_ids", []):
             artifact = artifacts.get(artifact_id)
             lines.append(_literal("Artifact: " + artifact_id).rstrip())
@@ -154,6 +153,7 @@ def render_day(
                 path = Path(local)
                 if not path.is_absolute():
                     path = paths.root / path
+                path = resolve_reference(path)
                 if path.is_file():
                     lines.append(_file_link(path, "Artifact bytes"))
                 else:
