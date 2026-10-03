@@ -102,7 +102,7 @@ def test_webhook_bad_shape_is_client_error_without_capture(tmp_path, payload):
     assert not list(paths.raw.rglob("events.jsonl"))
 
 
-def test_webhook_bad_json_and_storage_failure_are_safe(tmp_path, monkeypatch):
+def test_webhook_bad_json_and_storage_failure_are_safe(tmp_path, monkeypatch, caplog):
     paths = RecallPaths.from_root(tmp_path)
     response = client(paths).post("/bluebubbles/webhook", params={"token": SECRET}, content="{")
     assert response.status_code == 400
@@ -117,6 +117,8 @@ def test_webhook_bad_json_and_storage_failure_are_safe(tmp_path, monkeypatch):
         json={"type": "new-message", "data": message()},
     )
     assert response.status_code == 503 and SECRET not in response.text
+    assert "BlueBubbles capture unavailable; request not acknowledged" in caplog.text
+    assert SECRET not in caplog.text
     assert cursor(paths) is None
 
 

@@ -1,0 +1,23 @@
+[Unit]
+Description=Recall BlueBubbles webhook receiver
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/recall/bluebubbles
+ExecStart=%h/.local/share/recall/bluebubbles/package/bin/recall capture bluebubbles serve --skip-recovery --root %h/.local/share/recall/bluebubbles
+UnsetEnvironment=PYTHONPATH
+UMask=0077
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/recall/bluebubbles
+
+[Install]
+WantedBy=default.target

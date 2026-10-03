@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from secrets import compare_digest
 from typing import Any
 
@@ -44,6 +45,10 @@ def create_bluebubbles_webhook_app(
                 status_code=400, detail="Invalid BlueBubbles event payload"
             ) from None
         except Exception:
+            # Never log exception text, payloads or query-string credentials.
+            logging.getLogger(__name__).error(
+                "BlueBubbles capture unavailable; request not acknowledged"
+            )
             raise HTTPException(status_code=503, detail="BlueBubbles capture unavailable") from None
         return {
             "status": "ok",

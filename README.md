@@ -322,7 +322,8 @@ receiver begins serving.
 
 Webhooks reject malformed JSON and invalid message shapes with HTTP 400.
 Authentication failures return 401. Storage or writer contention returns 503,
-without an acknowledgement or secret-bearing diagnostic. Unknown structured
+without an acknowledgement or secret-bearing diagnostic. Capture failures log a
+constant error without exception text, payloads or query strings. Unknown structured
 event types are retained but do not advance the message cursor. Raw appends
 flush and sync the file and its directory before cursor advancement.
 
@@ -340,6 +341,29 @@ parsing. Handle objects contribute their address, not their serialized object.
 Chat objects may arrive as `chat` or `chats[]`; flattened exports remain supported.
 Missing handle addresses stay unresolved. These corrections do not migrate old
 normalized records or rewrite retained packets.
+
+The optional user units in `examples/systemd/recall-bluebubbles*.service` use a
+separate `~/.local/share/recall/bluebubbles` capture root and a pinned package at
+that root's `package` symlink. Create this as a Nix GC root for the exact checked
+store package before installing the units. Keep source configuration under
+`config/sources/bluebubbles.toml` in that operational root, owner-only, with
+loopback bind and a private token. Existing canonical data is not its input.
+
+The tunnel forwards `bub`'s loopback port 8042 to the receiver's loopback port
+8042. Register `http://127.0.0.1:8042/bluebubbles/webhook?token=...` on that server.
+The example requires existing trusted host keys, identities at
+`~/.ssh/id_ed25519` or `~/.ssh/id_rsa`, and an unlocked agent at `%t/ssh-agent`.
+It bypasses SSH config because Nix-owned config files appear unowned inside the
+user-unit sandbox. Adapt host, identities and socket before using it elsewhere.
+Expired agent keys block reconnection; service restart cannot unlock them.
+
+Both units restart on failure and report status through `systemctl --user` and
+`journalctl --user -u recall-bluebubbles.service -u recall-bluebubbles-tunnel.service`.
+The receiver disables startup recovery and access logs. It does not run a
+recurring recovery pull, normalize evidence, update search or generate journals.
+Use separately approved bounded recovery for outages. Keep the operational raw
+store and cursor together in backups. Stopping a receiver does not recover
+webhooks missed during that outage.
 
 Configure Telegram TDLib capture by copying `config/sources/telegram.toml.example`
 to `config/sources/telegram.toml`, then export the configured environment
