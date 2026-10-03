@@ -17,7 +17,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.local/share/recall/bluebubbles
+ReadWritePaths=/mnt/main/storage/home/%u/.local/share/recall/bluebubbles
 
 [Install]
 WantedBy=default.target

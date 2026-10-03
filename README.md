@@ -351,6 +351,12 @@ loopback bind and a private token. Existing canonical data is not its input.
 Check the capture root's actual mount and backup inclusion before relying on it.
 A home directory path may sit on a different subvolume than the repository or
 mail store; `findmnt -T ~/.local/share/recall/bluebubbles` shows the mounted source.
+On this host, that application path is a symlink to
+`/mnt/main/storage/home/jon/.local/share/recall/bluebubbles`. The receiver unit
+allows writes to the storage target, not the unbacked root subvolume. Adapt both
+the target and `ReadWritePaths` together on another host. Moving a directory under
+configured storage does not prove a remote backup exists; check a subsequent
+snapshot and restore.
 
 The tunnel forwards `bub`'s loopback port 8042 to the receiver's loopback port
 8042. Register `http://127.0.0.1:8042/bluebubbles/webhook?token=...` on that server.
