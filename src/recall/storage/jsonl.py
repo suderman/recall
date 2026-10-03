@@ -22,6 +22,7 @@ def write_jsonl(
     records: Iterable[Mapping[str, Any]],
     *,
     append: bool = False,
+    durable: bool = False,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # Serialize before opening an append-only raw log or replacing an existing file.
@@ -31,6 +32,15 @@ def write_jsonl(
     if append:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(content)
+            if durable:
+                handle.flush()
+                os.fsync(handle.fileno())
+        if durable:
+            descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
         return
     write_text_atomic(path, content)
 

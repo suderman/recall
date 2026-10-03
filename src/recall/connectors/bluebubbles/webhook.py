@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from secrets import compare_digest
 from typing import Any
 
@@ -30,8 +31,20 @@ def create_bluebubbles_webhook_app(
         ):
             raise HTTPException(status_code=401, detail="Invalid BlueBubbles webhook token")
 
-        payload = await request.json()
-        result = append_bluebubbles_event(paths, account=config.account, payload=payload)
+        try:
+            payload = await request.json()
+        except (json.JSONDecodeError, UnicodeError):
+            raise HTTPException(
+                status_code=400, detail="Invalid BlueBubbles JSON payload"
+            ) from None
+        try:
+            result = append_bluebubbles_event(paths, account=config.account, payload=payload)
+        except (ValueError, TypeError, OverflowError):
+            raise HTTPException(
+                status_code=400, detail="Invalid BlueBubbles event payload"
+            ) from None
+        except Exception:
+            raise HTTPException(status_code=503, detail="BlueBubbles capture unavailable") from None
         return {
             "status": "ok",
             "date": result.date,

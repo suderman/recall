@@ -320,6 +320,21 @@ If `server_url` and the configured password environment variable are set,
 Recall now attempts a bounded short-gap recovery on startup before the webhook
 receiver begins serving.
 
+Webhooks reject malformed JSON and invalid message shapes with HTTP 400.
+Authentication failures return 401. Storage or writer contention returns 503,
+without an acknowledgement or secret-bearing diagnostic. Unknown structured
+event types are retained but do not advance the message cursor. Raw appends
+flush and sync the file and its directory before cursor advancement.
+
+Recovery validates a complete response page before storing its messages. An
+unsupported response shape is a failure, not empty coverage. The cursor moves
+only after every page succeeds; partial raw evidence stays available for retry.
+Overlap checks use message GUIDs within the account across receipt dates.
+Corrupt raw JSONL stops recovery rather than being skipped. Both webhook and
+recovery use one workspace writer lock; a busy writer requires retry. Webhook
+redelivery can retain repeated raw receipts. These checks do not prove real
+server delivery or recover events the server no longer retains.
+
 Configure Telegram TDLib capture by copying `config/sources/telegram.toml.example`
 to `config/sources/telegram.toml`, then export the configured environment
 variables before running any `recall capture telegram tdlib-*` command.

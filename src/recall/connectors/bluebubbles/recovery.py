@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import importlib
-import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlencode
 
 from recall.connectors.bluebubbles.capture import (
     BLUEBUBBLES_CURSOR_KEY,
+    _append_bluebubbles_envelope,
     advance_bluebubbles_cursor,
-    append_bluebubbles_envelope,
+    bluebubbles_writer,
     local_date_for_timestamp,
 )
 from recall.connectors.bluebubbles.diagnostics import safe_error
+from recall.storage.jsonl import read_jsonl
 from recall.storage.paths import RecallPaths
 from recall.storage.state import get_connector_cursor
 
@@ -120,13 +121,13 @@ def _extract_attachments(message: dict[str, Any]) -> list[dict[str, Any]]:
     return attachments
 
 
-def _normalized_message_data(message: dict[str, Any]) -> dict[str, Any] | None:
+def _normalized_message_data(message: dict[str, Any]) -> dict[str, Any]:
     chat_value = message.get("chat")
     chat = chat_value if isinstance(chat_value, dict) else {}
     timestamp = _coerce_message_timestamp(message.get("dateCreated") or message.get("date"))
     guid = message.get("guid")
-    if not guid or timestamp is None:
-        return None
+    if not isinstance(guid, str) or not guid or timestamp is None:
+        raise ValueError("Recovery message requires a GUID and timestamp")
 
     handle = _extract_handle_value(message.get("handle"))
     participants = _extract_participants(message, chat)
@@ -179,47 +180,82 @@ def _query_body(
     }
 
 
-def _message_rows_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _message_rows_from_payload(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        raise ValueError("Recovery response requires an object")
     data = payload.get("data")
-    if isinstance(data, list):
-        return [item for item in data if isinstance(item, dict)]
     if isinstance(data, dict):
-        for key in ("data", "items", "messages", "results", "rows"):
-            value = data.get(key)
-            if isinstance(value, list):
-                return [item for item in value if isinstance(item, dict)]
         if any(key in data for key in ("guid", "dateCreated", "date")):
-            return [data]
-    return []
-
-
-def _existing_guids_for_date(cache: dict[str, set[str]], path: Path) -> set[str]:
-    cached = cache.get(str(path))
-    if cached is not None:
-        return cached
-
-    values: set[str] = set()
-    if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except Exception:
-                continue
-            payload = row.get("payload") if isinstance(row, dict) else {}
-            data = (
-                payload.get("data")
-                if isinstance(payload, dict) and isinstance(payload.get("data"), dict)
-                else payload
+            data = [data]
+        else:
+            data = next(
+                (
+                    data[key]
+                    for key in ("data", "items", "messages", "results", "rows")
+                    if key in data
+                ),
+                None,
             )
+    if not isinstance(data, list) or any(not isinstance(item, dict) for item in data):
+        raise ValueError("Recovery response requires a message list")
+    return data
+
+
+def _existing_guids(paths: RecallPaths, account: str) -> set[str]:
+    values: set[str] = set()
+    # Receipt day can differ from message day. Retained bundles themselves are not scanned.
+    for path in sorted((paths.raw / "bluebubbles").glob("????-??-??/events.jsonl")):
+        for row in read_jsonl(path):
+            if row.get("account") != account or row.get("event_type") not in {
+                "new-message",
+                "historical-message",
+                "recovered-message",
+            }:
+                continue
+            payload = row.get("payload") or {}
+            data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
             if isinstance(data, dict) and data.get("guid"):
                 values.add(str(data["guid"]))
-    cache[str(path)] = values
+        # A prior failed fsync may have left a complete but uncommitted raw record.
+        with path.open("rb") as stream:
+            os.fsync(stream.fileno())
+        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
     return values
 
 
 def recover_bluebubbles_messages(
+    paths: RecallPaths,
+    *,
+    account: str,
+    server_url: str,
+    password: str,
+    since: str | None = None,
+    until: str | None = None,
+    recover_hours: int = DEFAULT_RECOVERY_HOURS,
+    page_size: int = DEFAULT_RECOVERY_PAGE_SIZE,
+    overlap_seconds: int = DEFAULT_RECOVERY_OVERLAP_SECONDS,
+    client: BlueBubblesRecoveryHttpClient | None = None,
+) -> BlueBubblesRecoveryResult:
+    with bluebubbles_writer(paths):
+        return _recover_bluebubbles_messages(
+            paths,
+            account=account,
+            server_url=server_url,
+            password=password,
+            since=since,
+            until=until,
+            recover_hours=recover_hours,
+            page_size=page_size,
+            overlap_seconds=overlap_seconds,
+            client=client,
+        )
+
+
+def _recover_bluebubbles_messages(
     paths: RecallPaths,
     *,
     account: str,
@@ -255,7 +291,6 @@ def recover_bluebubbles_messages(
     httpx = importlib.import_module("httpx")
     http_client = client or httpx.Client(timeout=60.0, follow_redirects=True)
     owns_client = client is None
-    existing_guid_cache: dict[str, set[str]] = {}
     recovered_messages = 0
     skipped_existing = 0
     dates_written: list[str] = []
@@ -264,6 +299,7 @@ def recover_bluebubbles_messages(
     pages_fetched = 0
 
     try:
+        known_guids = _existing_guids(paths, account)
         while True:
             response = http_client.post(
                 url,
@@ -280,17 +316,15 @@ def recover_bluebubbles_messages(
             if not rows:
                 break
 
-            for row in rows:
-                data = _normalized_message_data(row)
-                if data is None:
-                    continue
-                timestamp = _coerce_message_timestamp(data.get("dateCreated"))
+            # Validate the entire page before any capture or coverage claim.
+            messages = [_normalized_message_data(row) for row in rows]
+            for data in messages:
+                timestamp = _coerce_message_timestamp(data["dateCreated"])
                 if timestamp is None:
-                    continue
-                last_seen_timestamp = timestamp
+                    raise ValueError("Recovery message timestamp missing")
+                if last_seen_timestamp is None or timestamp > last_seen_timestamp:
+                    last_seen_timestamp = timestamp
                 date = local_date_for_timestamp(timestamp)
-                events_path = paths.raw_capture_dir("bluebubbles", date) / "events.jsonl"
-                known_guids = _existing_guids_for_date(existing_guid_cache, events_path)
                 message_guid = str(data["guid"])
                 if message_guid in known_guids:
                     skipped_existing += 1
@@ -307,7 +341,9 @@ def recover_bluebubbles_messages(
                         "data": data,
                     },
                 }
-                append_bluebubbles_envelope(paths, date=date, envelope=envelope)
+                _append_bluebubbles_envelope(
+                    paths, date=date, envelope=envelope, update_cursor=False
+                )
                 known_guids.add(message_guid)
                 recovered_messages += 1
                 if date not in dates_written:
