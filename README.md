@@ -348,6 +348,9 @@ that root's `package` symlink. Create this as a Nix GC root for the exact checke
 store package before installing the units. Keep source configuration under
 `config/sources/bluebubbles.toml` in that operational root, owner-only, with
 loopback bind and a private token. Existing canonical data is not its input.
+Check the capture root's actual mount and backup inclusion before relying on it.
+A home directory path may sit on a different subvolume than the repository or
+mail store; `findmnt -T ~/.local/share/recall/bluebubbles` shows the mounted source.
 
 The tunnel forwards `bub`'s loopback port 8042 to the receiver's loopback port
 8042. Register `http://127.0.0.1:8042/bluebubbles/webhook?token=...` on that server.
@@ -364,6 +367,19 @@ recurring recovery pull, normalize evidence, update search or generate journals.
 Use separately approved bounded recovery for outages. Keep the operational raw
 store and cursor together in backups. Stopping a receiver does not recover
 webhooks missed during that outage.
+
+Inspect receipts and cursors without creating or migrating a store:
+
+```bash
+recall state show bluebubbles --root ~/.local/share/recall/bluebubbles --json
+```
+
+Status reports account-scoped receipt/message counts, distinct message GUIDs,
+raw partition dates, capture modes, last receipt/webhook times and stored cursors.
+Imported evidence does not establish recent webhook delivery. It does not print
+message payloads. Invalid raw records or unreadable state produce safe errors
+and a nonzero exit, not silent repair. Counts and cursors do not prove complete
+or current delivery; an empty capture stays visible even when services are up.
 
 Configure Telegram TDLib capture by copying `config/sources/telegram.toml.example`
 to `config/sources/telegram.toml`, then export the configured environment

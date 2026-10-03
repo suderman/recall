@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -24,9 +25,9 @@ from recall.connectors.bluebubbles.recovery import (
     DEFAULT_RECOVERY_PAGE_SIZE,
     recover_bluebubbles_messages,
 )
+from recall.connectors.bluebubbles.status import bluebubbles_status
 from recall.connectors.bluebubbles.webhook import create_bluebubbles_webhook_app
 from recall.storage.paths import RecallPaths
-from recall.storage.state import list_connector_cursors
 
 
 def _paths_for(root: Path | None) -> RecallPaths:
@@ -261,6 +262,9 @@ def sync_bluebubbles_entities(
 
 
 def show_bluebubbles_state(
+    json_output: bool = typer.Option(
+        False, "--json", help="Print read-only capture status as JSON."
+    ),
     account: str | None = typer.Option(
         None, "--account", help="BlueBubbles account label to inspect."
     ),
@@ -273,24 +277,37 @@ def show_bluebubbles_state(
         help="Workspace root to use.",
     ),
 ) -> None:
-    """Show stored BlueBubbles cursor state for one account."""
+    """Inspect BlueBubbles receipts and cursors without creating or migrating state."""
 
     paths = _paths_for(root)
-    paths.ensure_directories()
     config = load_bluebubbles_config(paths)
-    resolved_account = account or config.account
-    cursors = list_connector_cursors(paths, source="bluebubbles", account=resolved_account)
-
-    typer.echo("source=bluebubbles")
-    typer.echo(f"account={resolved_account}")
-    if not cursors:
-        typer.echo("cursor_state=empty")
-        return
-
-    for cursor in cursors:
-        typer.echo(f"cursor_key={cursor.cursor_key}")
-        typer.echo(f"cursor_value={cursor.cursor_value}")
-        typer.echo(f"updated_at={cursor.updated_at}")
+    report = bluebubbles_status(paths, account=account or config.account)
+    if json_output:
+        typer.echo(json.dumps(report, sort_keys=True))
+    else:
+        typer.echo("source=bluebubbles")
+        typer.echo(f"account={report['account']}")
+        if not report["cursors"]:
+            typer.echo("cursor_state=empty")
+        for cursor in report["cursors"]:
+            for key, value in cursor.items():
+                typer.echo(f"{key}={value}")
+        for key in (
+            "raw_files",
+            "receipts",
+            "message_receipts",
+            "unique_message_guids",
+            "last_received_at",
+            "last_webhook_received_at",
+        ):
+            typer.echo(f"{key}={report[key]}")
+        typer.echo("raw_dates=" + (",".join(report["raw_dates"]) or "-"))
+        typer.echo("capture_modes=" + json.dumps(report["capture_modes"], sort_keys=True))
+        typer.echo(f"coverage_note={report['coverage_note']}")
+        for error in report["errors"]:
+            typer.echo("error=" + json.dumps(error, sort_keys=True))
+    if report["errors"]:
+        raise typer.Exit(1)
 
 
 def import_bluebubbles_export_bundle(
