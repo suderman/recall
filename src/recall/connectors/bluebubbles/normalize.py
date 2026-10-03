@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from recall.connectors.bluebubbles.capture import raw_capture_paths
+from recall.connectors.bluebubbles.messages import handle_value, message_chat, participant_values
 from recall.entities.enrich import enrich_events_with_people
 from recall.normalize.artifacts import NormalizedArtifact, RemoteLocator
 from recall.normalize.events import NormalizedEvent, RawReference
@@ -82,32 +83,31 @@ def _message_data(row: dict[str, Any]) -> dict[str, Any]:
 def _conversation_id(data: dict[str, Any]) -> str:
     if data.get("chatGuid"):
         return str(data["chatGuid"])
-    chats = data.get("chats") or []
-    if chats and isinstance(chats[0], dict) and chats[0].get("guid"):
-        return str(chats[0]["guid"])
+    chat = message_chat(data)
+    if chat.get("guid"):
+        return str(chat["guid"])
     return "unknown-chat"
 
 
 def _conversation_label(data: dict[str, Any], conversation_id: str) -> str:
-    return str(data.get("chatDisplayName") or data.get("displayName") or conversation_id)
+    chat = message_chat(data)
+    return str(
+        data.get("chatDisplayName")
+        or data.get("displayName")
+        or chat.get("displayName")
+        or chat.get("name")
+        or conversation_id
+    )
 
 
 def _participants(data: dict[str, Any]) -> list[str]:
-    participants = data.get("participants") or []
-    if isinstance(participants, list):
-        values = [str(item) for item in participants if item]
-    else:
-        values = []
-    handle = data.get("handle")
-    if handle:
-        values.append(str(handle))
-    return sorted({_identity_id(value) for value in values})
+    return sorted({_identity_id(value) for value in participant_values(data)})
 
 
 def _sender_identity_id(data: dict[str, Any]) -> str | None:
-    handle = data.get("handle")
+    handle = handle_value(data.get("handle"))
     if handle:
-        return _identity_id(str(handle))
+        return _identity_id(handle)
     return None
 
 

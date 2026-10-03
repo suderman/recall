@@ -12,6 +12,8 @@ from fastapi.testclient import TestClient
 
 import recall.connectors.bluebubbles.capture as capture
 from recall.connectors.bluebubbles.config import BlueBubblesSourceConfig
+from recall.connectors.bluebubbles.entities import sync_bluebubbles_entities
+from recall.connectors.bluebubbles.normalize import _identity_id, normalize_bluebubbles_day
 from recall.connectors.bluebubbles.recovery import recover_bluebubbles_messages
 from recall.connectors.bluebubbles.webhook import create_bluebubbles_webhook_app
 from recall.storage.jsonl import read_jsonl
@@ -349,6 +351,83 @@ def test_malformed_later_page_does_not_certify_partial_recovery(tmp_path):
     assert cursor(paths) is None
     result = recover(paths, Pages([{"data": [message()]}]))
     assert result.skipped_existing == 1 and cursor(paths) is not None
+
+
+@pytest.mark.parametrize("chat_shape", ["chat", "chats", "flat"])
+def test_native_webhook_and_rest_have_same_chat_and_identities(tmp_path, chat_shape):
+    paths = RecallPaths.from_root(tmp_path / "webhook")
+    restored = RecallPaths.from_root(tmp_path / "rest")
+    data = message()
+    data.pop("chatGuid")
+    data["handle"] = {"address": "sender@example.test", "originalROWID": 15}
+    data["participants"] = [{"address": "sender@example.test"}]
+    chat = {
+        "guid": "fixture-chat",
+        "displayName": "Fixture group",
+        "participants": [{"address": "other@example.test"}],
+    }
+    if chat_shape == "chats":
+        data["chats"] = [chat]
+    elif chat_shape == "chat":
+        data["chat"] = chat
+    else:
+        data.update(
+            chatGuid=chat["guid"],
+            chatDisplayName=chat["displayName"],
+            handle="sender@example.test",
+            participants=["sender@example.test", "other@example.test"],
+        )
+    assert (
+        client(paths)
+        .post("/bluebubbles/webhook?token=" + SECRET, json={"type": "new-message", "data": data})
+        .status_code
+        == 200
+    )
+    # Receipt day is current, not the fixture message day. Normalize its retained partition.
+    raw = next(paths.raw.rglob("events.jsonl"))
+    day = raw.parent.name
+    before = raw.read_bytes()
+    first = read_jsonl(normalize_bluebubbles_day(paths, date=day)[0])[0]
+    sync_bluebubbles_entities(paths, date=day)
+    import sqlite3
+
+    with sqlite3.connect(paths.state / "recall.sqlite3") as connection:
+        values = {row[0] for row in connection.execute("SELECT value FROM identities")}
+    assert values == {"sender@example.test", "other@example.test"}
+    assert raw.read_bytes() == before
+    recover(restored, Pages([{"data": [data]}]))
+    second = read_jsonl(normalize_bluebubbles_day(restored, date="2026-03-31")[0])[0]
+    for event in (first, second):
+        assert event["conversation_id"] == "fixture-chat"
+        assert event["conversation_label"] == "Fixture group"
+        assert event["sender_identity_id"] == _identity_id("sender@example.test")
+        assert set(event["participant_identity_ids"]) == {
+            _identity_id("sender@example.test"),
+            _identity_id("other@example.test"),
+        }
+    assert first["event_id"] == second["event_id"]
+
+
+def test_unrecognized_handle_objects_do_not_invent_identities(tmp_path):
+    paths = RecallPaths.from_root(tmp_path)
+    data = {
+        **message(),
+        "handle": {"originalROWID": 15},
+        "participants": [{"displayName": "Unknown person"}, 17],
+    }
+    assert (
+        client(paths)
+        .post("/bluebubbles/webhook?token=" + SECRET, json={"type": "new-message", "data": data})
+        .status_code
+        == 200
+    )
+    raw = next(paths.raw.rglob("events.jsonl"))
+    day = raw.parent.name
+    before = raw.read_bytes()
+    event = read_jsonl(normalize_bluebubbles_day(paths, date=day)[0])[0]
+    assert event["sender_identity_id"] is None and event["participant_identity_ids"] == []
+    assert sync_bluebubbles_entities(paths, date=day).identities_synced == 0
+    assert raw.read_bytes() == before
 
 
 def test_recovery_query_uses_millisecond_bounds(tmp_path):

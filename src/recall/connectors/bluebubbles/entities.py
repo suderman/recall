@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from recall.connectors.bluebubbles.capture import raw_capture_paths
+from recall.connectors.bluebubbles.messages import participant_values
 from recall.connectors.bluebubbles.normalize import _identity_id, _identity_kind
 from recall.entities.storage import upsert_identities, upsert_identity_aliases
 from recall.storage.paths import RecallPaths
@@ -49,14 +50,7 @@ def _observed_values(rows: list[dict[str, Any]]) -> set[str]:
     observed: set[str] = set()
     for row in rows:
         data = _message_data(row)
-        handle = data.get("handle")
-        if handle:
-            observed.add(str(handle))
-        participants = data.get("participants") or []
-        if isinstance(participants, list):
-            for participant in participants:
-                if participant:
-                    observed.add(str(participant))
+        observed.update(participant_values(data))
     return observed
 
 
@@ -120,15 +114,7 @@ def sync_bluebubbles_entities(paths: RecallPaths, *, date: str) -> BlueBubblesEn
 
         for row in rows:
             data = _message_data(row)
-            related_values = set()
-            handle = data.get("handle")
-            if handle:
-                related_values.add(str(handle))
-            participants = data.get("participants") or []
-            if isinstance(participants, list):
-                related_values.update(
-                    str(participant) for participant in participants if participant
-                )
+            related_values = set(participant_values(data))
             if value not in related_values:
                 continue
             for alias_row in _alias_rows(identity_id, data, created_at):

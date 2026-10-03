@@ -15,6 +15,7 @@ from recall.connectors.bluebubbles.capture import (
     local_date_for_timestamp,
 )
 from recall.connectors.bluebubbles.diagnostics import safe_error
+from recall.connectors.bluebubbles.messages import handle_value, message_chat, participant_values
 from recall.storage.jsonl import read_jsonl
 from recall.storage.paths import RecallPaths
 from recall.storage.state import get_connector_cursor
@@ -62,35 +63,6 @@ def _coerce_message_timestamp(value: Any) -> str | None:
     return datetime.fromtimestamp(numeric, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _extract_handle_value(value: Any) -> str | None:
-    if isinstance(value, str):
-        stripped = value.strip()
-        return stripped or None
-    if not isinstance(value, dict):
-        return None
-    for key in ("address", "handle", "value", "identifier"):
-        candidate = value.get(key)
-        if isinstance(candidate, str) and candidate.strip():
-            return candidate.strip()
-    return None
-
-
-def _extract_participants(message: dict[str, Any], chat: dict[str, Any]) -> list[str]:
-    values: list[str] = []
-    for source in (message.get("participants"), chat.get("participants")):
-        if not isinstance(source, list):
-            continue
-        for item in source:
-            participant = _extract_handle_value(item)
-            if participant:
-                values.append(participant)
-
-    handle = _extract_handle_value(message.get("handle"))
-    if handle:
-        values.append(handle)
-    return sorted(set(values))
-
-
 def _extract_attachments(message: dict[str, Any]) -> list[dict[str, Any]]:
     raw_attachments = message.get("attachments")
     if raw_attachments is None and isinstance(message.get("attachment"), list):
@@ -122,15 +94,14 @@ def _extract_attachments(message: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _normalized_message_data(message: dict[str, Any]) -> dict[str, Any]:
-    chat_value = message.get("chat")
-    chat = chat_value if isinstance(chat_value, dict) else {}
+    chat = message_chat(message)
     timestamp = _coerce_message_timestamp(message.get("dateCreated") or message.get("date"))
     guid = message.get("guid")
     if not isinstance(guid, str) or not guid or timestamp is None:
         raise ValueError("Recovery message requires a GUID and timestamp")
 
-    handle = _extract_handle_value(message.get("handle"))
-    participants = _extract_participants(message, chat)
+    handle = handle_value(message.get("handle"))
+    participants = participant_values(message)
     if handle and handle not in participants:
         participants.append(handle)
         participants.sort()

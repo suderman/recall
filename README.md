@@ -335,6 +335,12 @@ recovery use one workspace writer lock; a busy writer requires retry. Webhook
 redelivery can retain repeated raw receipts. These checks do not prove real
 server delivery or recover events the server no longer retains.
 
+Normalization, entity extraction and recovery share BlueBubbles message-field
+parsing. Handle objects contribute their address, not their serialized object.
+Chat objects may arrive as `chat` or `chats[]`; flattened exports remain supported.
+Missing handle addresses stay unresolved. These corrections do not migrate old
+normalized records or rewrite retained packets.
+
 Configure Telegram TDLib capture by copying `config/sources/telegram.toml.example`
 to `config/sources/telegram.toml`, then export the configured environment
 variables before running any `recall capture telegram tdlib-*` command.
