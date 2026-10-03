@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+from email import policy
+from email.parser import BytesHeaderParser
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -64,6 +66,33 @@ def normalized_citation(path: Path, line: int, event: dict[str, Any]) -> tuple[P
         return physical, "Normalized citation missing, unreadable or invalid"
 
 
+def _maildir_reference(path: Path, event: dict[str, Any]) -> tuple[Path, str | None]:
+    """Recover a flag-only rename, not a moved or guessed email message."""
+    stem, separator, _ = path.name.partition(":2,")
+    message_id = (event.get("raw_ref", {}).get("locator") or {}).get("message_id")
+    if event.get("source") != "email" or path.parent.name != "cur" or not separator:
+        return path, "Raw citation missing or not a regular file"
+    if not isinstance(message_id, str) or not message_id:
+        return path, "Maildir citation unverifiable: missing recorded Message-ID"
+    try:
+        matches = [p for p in path.parent.iterdir() if p.name.partition(":2,")[:2] == (stem, ":2,")]
+        if not matches:
+            return path, "Maildir citation missing"
+        if len(matches) != 1:
+            return path, "Maildir citation ambiguous: multiple flag variants"
+        candidate = matches[0]
+        if candidate.is_symlink() or not candidate.is_file():
+            return path, "Maildir citation is not a regular file"
+        with candidate.open("rb") as stream:
+            headers = BytesHeaderParser(policy=policy.default).parse(stream)
+        ids = headers.get_all("Message-ID", [])
+        if len(ids) != 1 or str(ids[0]).strip().strip("<>") != message_id.strip().strip("<>"):
+            return path, "Maildir citation Message-ID missing or mismatched"
+        return candidate, None
+    except (OSError, ValueError):
+        return path, "Maildir citation unreadable or invalid"
+
+
 def raw_reference(event: dict[str, Any], normalized_path: Path) -> tuple[Path | None, str | None]:
     raw = event.get("raw_ref") or {}
     if not raw.get("path") or raw["path"].startswith("local:"):
@@ -74,5 +103,7 @@ def raw_reference(event: dict[str, Any], normalized_path: Path) -> tuple[Path | 
         path = normalized_path.parents[3] / path
     physical = resolve_reference(path)
     if not physical.is_file():
-        return physical, "Raw citation missing or not a regular file"
+        if physical.exists() or physical.is_symlink():
+            return physical, "Raw citation missing or not a regular file"
+        return _maildir_reference(physical, event)
     return physical, None

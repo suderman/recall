@@ -762,7 +762,7 @@ RECALL_RELOCATION_MAP=/path/to/moves.json recall journal inspect --revision /old
 ```
 
 The most specific mapping wins, even if something recreates the old path.
-Without this explicit setting, readers do not guess alternate locations. An
+Without this explicit setting, readers do not guess alternate archive locations. An
 invalid map stops the read. Search, person/project results, packet readers and
 newly rendered evidence links use the map without changing archived JSON,
 packet hashes, revisions, journals or the existing index.
@@ -773,6 +773,12 @@ Search JSON keeps the recorded `normalized_path` and adds
 event at its physical line. Missing or changed evidence produces a visible
 error, not an apparently valid file link. Use resolved paths only when their
 error fields are null.
+
+For email files missing after a Maildir flag rename, readers check only the same
+`cur/` directory after relocation. A unique regular file must keep the filename
+before `:2,` and match the recorded Message-ID. Missing, ambiguous, symlinked or
+identity-mismatched candidates remain unresolved. This does not search other
+folders or prove unchanged message bytes. Recorded paths and packets stay intact.
 
 `journal inspect` checks packet hashes and, for revisions, body and revision
 hashes. It reports current normalized and raw citations, exits nonzero for
