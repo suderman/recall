@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+from datetime import date as calendar_date
 from pathlib import Path
 from typing import Any
 
@@ -23,8 +25,10 @@ from recall.connectors.telegram.tdlib import (
     TdlibTelegramClient,
     build_tdlib_auth_settings,
 )
+from recall.storage.blobs import cache_error
 from recall.storage.jsonl import read_jsonl
 from recall.storage.paths import RecallPaths
+from recall.storage.references import resolve_reference
 
 
 def _paths_for(root: Path | None) -> RecallPaths:
@@ -125,6 +129,115 @@ def show_artifacts(
     for artifact in artifacts:
         for line in _render_artifact(artifact):
             typer.echo(line)
+
+
+def _verify_artifact(row: Any, paths: RecallPaths, source: str) -> dict[str, Any]:
+    if not isinstance(row, dict) or row.get("source") != source:
+        raise ValueError("Invalid artifact metadata")
+    artifact_id = row.get("artifact_id")
+    local = row.get("local_path")
+    size = row.get("size_bytes")
+    checksums = row.get("checksums", {})
+    if checksums is None:
+        checksums = {}
+    status = row.get("download_status")
+    if (
+        not isinstance(artifact_id, str)
+        or not artifact_id
+        or (local is not None and (not isinstance(local, str) or not local))
+        or (size is not None and (type(size) is not int or size < 0))
+        or not isinstance(checksums, dict)
+        or status
+        not in {"downloaded", "imported", "not_requested", "failed", "not_available", "deferred"}
+    ):
+        raise ValueError("Invalid artifact metadata")
+    sha = checksums.get("sha256")
+    if sha is not None and (not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha)):
+        raise ValueError("Invalid artifact metadata")
+    item = {"artifact_id": artifact_id, "local_path": local, "resolved_local_path": None}
+    if local is None:
+        error = (
+            "Artifact cache missing local_path" if status in {"downloaded", "imported"} else None
+        )
+        return {**item, "verification": "invalid" if error else "not_acquired", "error": error}
+    recorded = Path(local)
+    if not recorded.is_absolute():
+        recorded = paths.root / recorded
+    try:
+        physical = resolve_reference(recorded)
+    except ValueError:
+        return {**item, "verification": "unverifiable", "error": "Invalid relocation map"}
+    error = cache_error(physical, row)
+    return {
+        **item,
+        "resolved_local_path": str(physical),
+        "verification": "unverifiable"
+        if error and "unverifiable" in error
+        else "invalid"
+        if error
+        else "valid",
+        "error": error,
+    }
+
+
+def verify_artifacts(
+    date: str = typer.Option(..., "--date", help="Metadata date in YYYY-MM-DD format."),
+    source: str = typer.Option("slack", "--source", help="Artifact source to verify."),
+    root: Path | None = typer.Option(None, "--root", resolve_path=True),
+    as_json: bool = typer.Option(False, "--json", help="Print the verification report as JSON."),
+) -> None:
+    """Verify recorded local bytes without credentials, acquisition or repair."""
+    try:
+        if calendar_date.fromisoformat(date).isoformat() != date or not re.fullmatch(
+            r"[a-z][a-z0-9_-]*", source
+        ):
+            raise ValueError("Invalid scope")
+    except ValueError as exc:
+        raise typer.BadParameter("Use a source name and date in YYYY-MM-DD format") from exc
+    paths = _paths_for(root)
+    metadata = paths.artifact_metadata_path(source, date)
+    artifacts = []
+    errors = []
+    try:
+        with metadata.open(encoding="utf-8") as stream:
+            for line, text in enumerate(stream, 1):
+                if not text.strip():
+                    continue
+                try:
+                    item = _verify_artifact(json.loads(text), paths, source)
+                except (ValueError, TypeError):
+                    errors.append({"kind": "metadata_record_invalid", "line": line})
+                    continue
+                artifacts.append({"line": line, **item})
+    except (OSError, UnicodeError):
+        errors.append({"kind": "metadata_unreadable"})
+    counts = {
+        state: sum(item["verification"] == state for item in artifacts)
+        for state in ("valid", "invalid", "unverifiable", "not_acquired")
+    }
+    report = {
+        "source": source,
+        "date": date,
+        "metadata_path": str(metadata),
+        "counts": counts,
+        "artifacts": artifacts,
+        "errors": errors,
+        "verification_note": "Matching recorded integrity does not prove source completeness.",
+    }
+    if as_json:
+        typer.echo(json.dumps(report, indent=2, ensure_ascii=True, sort_keys=True))
+    else:
+        typer.echo(f"source={source} date={date} metadata_path={metadata}")
+        for state, count in counts.items():
+            typer.echo(f"{state}={count}")
+        for item in artifacts:
+            label = json.dumps(item["artifact_id"], ensure_ascii=True)
+            typer.echo(f"{label}: {item['verification']} {item['error'] or ''}")
+        for error in errors:
+            typer.echo(f"error={error['kind']} line={error.get('line', '-')}")
+        typer.echo(report["verification_note"])
+    if counts["invalid"] or counts["unverifiable"] or errors:
+        raise typer.Exit(1)
 
 
 def download_slack_artifact_bytes(

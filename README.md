@@ -608,6 +608,31 @@ fallback. Export media must resolve inside its retained bundle, including when
 reading older imported locators. Dry runs do not initialize TDLib or write
 metadata or blobs.
 
+## Verify retained artifact bytes
+
+```bash
+recall artifacts verify --root /path/to/archive --source telegram --date 2026-04-02 --json
+```
+
+This read-only command checks every metadata record for the selected source/day.
+It uses no credentials, connector configuration, TDLib or HTTP client. JSON reports
+`valid`, `invalid`, `unverifiable` and `not_acquired` counts, physical metadata
+lines, resolved local paths and integrity errors. Text output is also available.
+Remote locators and stored download errors are not printed.
+
+Missing metadata, malformed records, missing acquired bytes, size mismatches and
+checksum mismatches cause exit status 1. A missing SHA-256 checksum is
+`unverifiable`, also exit 1. Unacquired metadata with no local path is
+`not_acquired`, not a valid cache. An empty metadata file has zero counts and
+exit status 0; it does not establish coverage. If size is absent, a matching
+SHA-256 is sufficient to verify recorded integrity. Neither a checksum nor size
+proves that the source download was complete.
+
+Imported local paths receive the same checks. `RECALL_RELOCATION_MAP` explicitly
+resolves archived paths before reading; invalid maps fail without falling back
+to another file. Verification never updates metadata, removes evidence or fetches
+a replacement. Inspect mismatches before authorizing repair or acquisition.
+
 ## Inspect repeated source records
 
 ```bash

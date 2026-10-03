@@ -10,6 +10,7 @@ from recall.cli.artifacts import (
     download_slack_artifact_bytes,
     download_telegram_artifact_bytes,
     show_artifacts,
+    verify_artifacts,
 )
 from recall.cli.backfill import slack as backfill_slack
 from recall.cli.entities import (
@@ -206,6 +207,7 @@ search_app.command("project")(recall_project)
 events_app.command("show")(show_events)
 events_app.command("overlaps")(show_overlaps)
 artifacts_app.command("show")(show_artifacts)
+artifacts_app.command("verify")(verify_artifacts)
 artifacts_download_app.command("slack")(download_slack_artifact_bytes)
 artifacts_download_app.command("bluebubbles")(download_bluebubbles_artifact_bytes)
 artifacts_download_app.command("telegram")(download_telegram_artifact_bytes)
