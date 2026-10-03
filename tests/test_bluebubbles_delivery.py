@@ -351,6 +351,14 @@ def test_malformed_later_page_does_not_certify_partial_recovery(tmp_path):
     assert result.skipped_existing == 1 and cursor(paths) is not None
 
 
+def test_recovery_query_uses_millisecond_bounds(tmp_path):
+    paths = RecallPaths.from_root(tmp_path)
+    pages = Pages([{"data": []}])
+    recover(paths, pages)
+    assert pages.calls[0]["after"] == 1774915200000
+    assert pages.calls[0]["before"] == 1775001600000
+
+
 def test_unknown_webhook_event_is_retained_without_message_cursor(tmp_path):
     paths = RecallPaths.from_root(tmp_path)
     response = client(paths).post(

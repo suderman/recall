@@ -174,8 +174,8 @@ def _query_body(
         "limit": limit,
         "offset": offset,
         "with": ["chat", "chat.participants", "attachment", "handle"],
-        "after": int(after.timestamp()),
-        "before": int(before.timestamp()),
+        "after": int(after.timestamp() * 1000),
+        "before": int(before.timestamp() * 1000),
         "sort": "ASC",
     }
 
