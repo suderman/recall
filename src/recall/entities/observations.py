@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import closing
+from pathlib import Path
 from typing import Any
 
 from recall.storage.jsonl import read_jsonl, write_jsonl
@@ -12,12 +13,14 @@ from recall.storage.paths import RecallPaths
 LABELS_PATH = "rebuild/identity-labels.jsonl"
 
 
-def observed_labels(paths: RecallPaths) -> dict[str, list[str]]:
+def observed_labels(
+    paths: RecallPaths, *, database: Path | None = None, snapshot: Path | None = None
+) -> dict[str, list[str]]:
+    database = database if database is not None else paths.database
+    snapshot = snapshot if snapshot is not None else paths.state / LABELS_PATH
     labels: dict[str, set[str]] = {}
-    if paths.database.exists():
-        with closing(
-            sqlite3.connect(paths.database.resolve().as_uri() + "?mode=ro", uri=True)
-        ) as db:
+    if database.exists():
+        with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)) as db:
             db.execute("BEGIN")
             for identity, value, label in db.execute(
                 "SELECT identity_id,value,label FROM identities"
@@ -25,7 +28,6 @@ def observed_labels(paths: RecallPaths) -> dict[str, list[str]]:
                 labels[identity] = {item for item in (value, label) if item}
             for identity, value in db.execute("SELECT identity_id,value FROM identity_aliases"):
                 labels.setdefault(identity, set()).add(value)
-    snapshot = paths.state / LABELS_PATH
     if snapshot.exists():
         for row in read_jsonl(snapshot):
             try:

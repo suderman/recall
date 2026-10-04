@@ -18,7 +18,7 @@ from recall.entities.observations import LABELS_PATH
 from recall.entities.observations import observed_labels as read_identity_labels
 from recall.normalize.time import event_datetime
 from recall.storage.paths import RecallPaths
-from recall.storage.references import normalized_citation, raw_reference
+from recall.storage.references import normalized_citation, raw_reference, resolve_reference
 from recall.synthesize.timeline import _file_link, _literal
 
 FORMAT = "recall-search-v1"
@@ -205,6 +205,132 @@ def build_index(
             return {"index": str(target), "events": count, "files": len(files)}
         finally:
             temporary.unlink(missing_ok=True)
+
+
+def index_status(index: Path) -> dict[str, Any]:
+    """Compare the frozen index manifest with current inputs, without rebuilding."""
+    report: dict[str, Any] = {
+        "index": str(index),
+        "status": "unverifiable",
+        "roots": [],
+        "inputs": [],
+        "added_inputs": [],
+        "sources": [],
+        "errors": [],
+        "note": "Unchanged indexed inputs do not prove capture freshness or completeness. "
+        "This check does not validate individual citations or raw bytes.",
+    }
+    try:
+        with closing(_read_only(index)) as db:
+            db.execute("BEGIN")
+            _owned(db)
+            manifest = json.loads(
+                db.execute("SELECT value FROM metadata WHERE key='inputs'").fetchone()[0]
+            )
+            roots, inputs, labels = (
+                manifest["roots"],
+                manifest["inputs"],
+                manifest["identity_labels"],
+            )
+            if (
+                not isinstance(roots, list)
+                or not roots
+                or not all(isinstance(p, str) and Path(p).is_absolute() for p in roots)
+                or not isinstance(inputs, dict)
+                or not isinstance(labels, dict)
+                or set(labels) != set(roots)
+                or not all(isinstance(v, dict) for v in labels.values())
+                or not all(
+                    isinstance(identity, str)
+                    and isinstance(values, list)
+                    and all(isinstance(value, str) for value in values)
+                    for identities in labels.values()
+                    for identity, values in identities.items()
+                )
+                or not all(
+                    isinstance(p, str)
+                    and Path(p).is_absolute()
+                    and isinstance(h, str)
+                    and re.fullmatch(r"[0-9a-f]{64}", h)
+                    for p, h in inputs.items()
+                )
+            ):
+                raise ValueError("Invalid index manifest")
+            report["events"] = db.execute("SELECT count(*) FROM events").fetchone()[0]
+            report["sources"] = [
+                dict(zip(("source", "first_date", "last_date", "events"), row, strict=True))
+                for row in db.execute(
+                    "SELECT e.source,min(d.date),max(d.date),count(DISTINCT e.event_id) "
+                    "FROM events e JOIN event_dates d ON e.event_id=d.event_id "
+                    "GROUP BY e.source ORDER BY e.source"
+                )
+            ]
+        recorded_paths = {resolve_reference(Path(p)) for p in inputs}
+        current_paths: set[Path] = set()
+        for root in roots:
+            paths = RecallPaths.from_root(resolve_reference(Path(root)))
+            item = {
+                "recorded_root": root,
+                "resolved_root": str(paths.root),
+                "status": "available",
+                "identity_labels": "unverifiable",
+            }
+            report["roots"].append(item)
+            if not paths.normalized.is_dir():
+                item["status"] = "missing"
+            else:
+                current_paths.update(
+                    resolve_reference(p) for p in paths.normalized.glob("*/*.jsonl")
+                )
+            snapshot = paths.state / LABELS_PATH
+            if snapshot.exists():
+                current_paths.add(resolve_reference(snapshot))
+            try:
+                item["identity_labels"] = (
+                    "unchanged"
+                    if read_identity_labels(
+                        paths,
+                        database=resolve_reference(paths.database),
+                        snapshot=resolve_reference(snapshot),
+                    )
+                    == labels[root]
+                    else "changed"
+                )
+            except (OSError, ValueError, KeyError, TypeError, sqlite3.Error):
+                item["identity_labels"] = "unverifiable"
+        report["added_inputs"] = sorted(str(p) for p in current_paths - recorded_paths)
+        for recorded, expected in inputs.items():
+            physical = resolve_reference(Path(recorded))
+            state = "unchanged"
+            try:
+                with physical.open("rb") as stream:
+                    actual = hashlib.file_digest(stream, "sha256").hexdigest()
+                if actual != expected:
+                    state = "changed"
+            except FileNotFoundError:
+                state = "missing"
+            except OSError:
+                state = "unreadable"
+            report["inputs"].append(
+                {"path": recorded, "resolved_path": str(physical), "status": state}
+            )
+        states = {r["status"] for r in report["inputs"]}
+        label_states = {r["identity_labels"] for r in report["roots"]}
+        if "unreadable" in states or "unverifiable" in label_states:
+            report["status"] = "unverifiable"
+        elif (
+            states - {"unchanged"}
+            or label_states - {"unchanged"}
+            or report["added_inputs"]
+            or any(r["status"] != "available" for r in report["roots"])
+        ):
+            report["status"] = "stale"
+        else:
+            report["status"] = "unchanged"
+    except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError, sqlite3.Error):
+        report["status"] = "unverifiable"
+        report["errors"].append("Index or input manifest is missing, unreadable or invalid")
+    return report
 
 
 def search(

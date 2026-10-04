@@ -36,6 +36,9 @@ from recall.cli.search import (
 from recall.cli.search import (
     query as search_history,
 )
+from recall.cli.search import (
+    status as search_status,
+)
 from recall.cli.timeline import build_timeline
 from recall.config import resolve_root
 from recall.connectors.asana.cli import (
@@ -202,6 +205,7 @@ journal_app.command("save")(save_journal)
 journal_app.command("publish")(publish_journal)
 search_app.command("index")(build_search_index)
 search_app.command("query")(search_history)
+search_app.command("status")(search_status)
 search_app.command("person")(recall_person)
 search_app.command("project")(recall_project)
 events_app.command("show")(show_events)

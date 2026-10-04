@@ -836,6 +836,20 @@ links to normalized and available original evidence. Calendar locators remain
 explicit where no local file link exists. The last captured record does not
 prove the last real interaction.
 
+Check indexed input freshness without rebuilding:
+
+```bash
+recall search status --root /path/to/archive --json
+```
+
+The command compares recorded input hashes, current normalized file membership
+and identity labels across all recorded roots in their original overlay order.
+It uses explicit relocation maps for moved roots and files. It reports changed,
+missing, unreadable and newly added inputs. `unchanged` exits 0; `stale` and
+`unverifiable` exit 1. Reports include indexed source date bounds, not proof of
+capture completeness. Checking index inputs does not validate raw bytes or each
+citation, and it does not fetch, initialize, rebuild or repair anything.
+
 Rebuild the index after changing normalized evidence. It is a snapshot, not a
 live query of remote systems. Failed indexing preserves the previous database.
 The index lives under `data/derived/`; it is not the primary event store. Org

@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 from recall.config import resolve_root
-from recall.search import build_index, render_results, search
+from recall.search import build_index, index_status, render_results, search
 from recall.storage.paths import RecallPaths
 
 
@@ -24,6 +24,31 @@ def index(
     except (ValueError, OSError, sqlite3.Error) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(json.dumps(result, sort_keys=True))
+
+
+def status(
+    root: Path | None = typer.Option(None, "--root"),
+    index_path: Path | None = typer.Option(None, "--index"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Inspect indexed input freshness without rebuilding or repairing anything."""
+    paths = RecallPaths.from_root(resolve_root(root))
+    report = index_status(index_path or paths.derived / "search.sqlite3")
+    if as_json:
+        typer.echo(json.dumps(report, ensure_ascii=True, indent=2))
+    else:
+        typer.echo(f"status={report['status']}")
+        typer.echo(f"events={report.get('events', '-')}")
+        for group in ("roots", "inputs"):
+            for item in report[group]:
+                typer.echo(f"{group}=" + json.dumps(item, ensure_ascii=True))
+        for path in report["added_inputs"]:
+            typer.echo("added_input=" + json.dumps(path, ensure_ascii=True))
+        for error in report["errors"]:
+            typer.echo(f"error={error}")
+        typer.echo(report["note"])
+    if report["status"] != "unchanged":
+        raise typer.Exit(1)
 
 
 def query(
