@@ -146,6 +146,9 @@ def publish(
 def inspect(
     packet: Path | None = typer.Option(None, "--packet"),
     revision: Path | None = typer.Option(None, "--revision"),
+    require_current: bool = typer.Option(
+        False, "--require-current", help="Also require all recorded input hashes to match."
+    ),
 ) -> None:
     """Check immutable packet/revision hashes and current citations. Never write or call a model."""
     if (packet is None) == (revision is None):
@@ -159,7 +162,9 @@ def inspect(
         if revision is not None:
             result["revision"] = str(resolve_reference(revision))
         typer.echo(json.dumps(result, ensure_ascii=True, indent=2))
-        if result["unresolved_citations"]:
+        if result["unresolved_citations"] or (
+            require_current and result["input_status"] != "unchanged"
+        ):
             raise typer.Exit(1)
     except (ValueError, OSError, ZoneInfoNotFoundError) as exc:
         typer.echo(str(exc), err=True)

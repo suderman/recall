@@ -315,10 +315,56 @@ def _load_packet(directory: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]
     return packet, read_jsonl(directory / "events.jsonl")
 
 
+def _inspect_inputs(packet: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
+    """Report live drift separately from the validity of a frozen packet."""
+    inputs = packet.get("normalized_inputs", [packet])
+    if not isinstance(inputs, list) or not inputs:
+        return [], "unverifiable"
+    results = []
+    states = set()
+    for saved in inputs:
+        result = {}
+        for kind in ("normalized", "coverage"):
+            path = saved.get(f"{kind}_path") if isinstance(saved, dict) else None
+            expected = saved.get(f"{kind}_sha256") if isinstance(saved, dict) else None
+            state = "not-recorded"
+            physical = None
+            if isinstance(path, str) and Path(path).is_absolute():
+                physical = resolve_reference(Path(path))
+                if expected is not None and (
+                    not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected)
+                ):
+                    state = "unverifiable"
+                else:
+                    try:
+                        with physical.open("rb") as stream:
+                            current = hashlib.file_digest(stream, "sha256").hexdigest()
+                        state = "unchanged" if current == expected else "changed"
+                    except FileNotFoundError:
+                        state = "absent" if expected is None else "missing"
+                    except OSError:
+                        state = "unreadable"
+            elif path is not None:
+                state = "unverifiable"
+            result[f"{kind}_path"] = path if isinstance(path, str) else None
+            result[f"resolved_{kind}_path"] = str(physical) if physical else None
+            result[f"{kind}_status"] = state
+            states.add(state)
+        results.append(result)
+    if states & {"not-recorded", "unverifiable", "unreadable"}:
+        status = "unverifiable"
+    elif states & {"changed", "missing"}:
+        status = "changed"
+    else:
+        status = "unchanged"
+    return results, status
+
+
 def inspect_packet(directory: Path) -> dict[str, Any]:
     """Verify frozen packet hashes and report current evidence references read-only."""
     directory = resolve_reference(directory)
     packet, events = _load_packet(directory)
+    inputs, input_status = _inspect_inputs(packet)
     files: dict[Path, dict[str, tuple[int, dict[str, Any]]]] = {}
     citations = []
     for event in events:
@@ -358,6 +404,15 @@ def inspect_packet(directory: Path) -> dict[str, Any]:
         "packet_sha256": directory.name,
         "date": packet["date"],
         "events": len(events),
+        "coverage": packet.get("coverage", []),
+        "sources": [
+            {"source": source, "events": count}
+            for source, count in sorted(Counter(row["source"] for row in events).items())
+        ],
+        "inputs": inputs,
+        "input_status": input_status,
+        "review_note": "Coverage is frozen at preparation, not proof of complete capture. "
+        "Hashes, input freshness and valid citations do not establish claim truth.",
         "citations": citations,
         "unresolved_citations": [
             row for row in citations if row["citation_error"] or row["raw_citation_error"]

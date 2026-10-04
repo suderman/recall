@@ -888,8 +888,15 @@ folders or prove unchanged message bytes. Recorded paths and packets stay intact
 
 `journal inspect` checks packet hashes and, for revisions, body and revision
 hashes. It reports current normalized and raw citations, exits nonzero for
-unresolved citations, and never writes or calls a model. Valid hashes and links
-do not prove that a journal's claims are true.
+unresolved citations, and never writes or calls a model. Reports also include
+frozen source/account coverage, event counts, ordered inputs and current input
+hash status. Changed inputs do not invalidate an intact frozen packet. Add
+`--require-current` to exit nonzero when inputs changed or cannot be verified.
+Older single-root packets lack recorded coverage hashes and report that limit
+rather than claiming currentness. New files on unrelated days do not change a
+daily packet's normalized input status. Coverage remains what was recorded at
+preparation; it is not a live capture check. Valid hashes and links do not prove
+that a journal's claims are true.
 
 To test a fresh index, use a private primary root and explicitly include the
 current physical input roots with `search index --include-root`. Do not replace
