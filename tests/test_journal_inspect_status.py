@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -76,6 +77,7 @@ def test_frozen_coverage_counts_and_order_are_visible_and_immutable(tmp_path):
     assert inspect_packet(packet) == report and unchanged(packet) == before
 
 
+@pytest.mark.parametrize("multi", [False, True])
 @pytest.mark.parametrize(
     "change",
     [
@@ -88,8 +90,8 @@ def test_frozen_coverage_counts_and_order_are_visible_and_immutable(tmp_path):
         "directory",
     ],
 )
-def test_detects_input_drift_without_rewriting_packet(tmp_path, change):
-    paths, extra, packet = fixture(tmp_path, coverage=change != "coverage-add")
+def test_detects_input_drift_without_rewriting_packet(tmp_path, change, multi):
+    paths, extra, packet = fixture(tmp_path, multi=multi, coverage=change != "coverage-add")
     before = unchanged(packet)
     normalized = paths.normalized_event_path(DAY)
     manifest = paths.state / "rebuild/manifest.jsonl"
@@ -110,7 +112,10 @@ def test_detects_input_drift_without_rewriting_packet(tmp_path, change):
         manifest.unlink()
         manifest.mkdir()
     report = inspect_packet(packet)
-    assert report["input_status"] == ("unverifiable" if change == "directory" else "changed")
+    expected = "unverifiable" if change == "directory" else "changed"
+    if change == "overlay-add" and not multi:
+        expected = "unchanged"
+    assert report["input_status"] == expected
     assert unchanged(packet) == before
     # Frozen success remains frozen success, not replaced by live failed coverage.
     assert next(r for r in report["coverage"] if r["source"] == "email")["status"] == (
@@ -140,10 +145,9 @@ def test_require_current_is_explicit_not_a_frozen_validity_change(tmp_path, mult
     command = ["journal", "inspect", "--" + target, str(value)]
     runner = CliRunner()
     assert runner.invoke(app, command).exit_code == 0
-    expected = "unchanged" if multi else "unverifiable"
-    assert json.loads(runner.invoke(app, command).stdout)["input_status"] == expected
+    assert json.loads(runner.invoke(app, command).stdout)["input_status"] == "unchanged"
     strict = runner.invoke(app, command + ["--require-current"])
-    assert strict.exit_code == (0 if multi else 1)
+    assert strict.exit_code == 0
     with paths.normalized_event_path(DAY).open("a") as stream:
         stream.write("\n")
     assert runner.invoke(app, command).exit_code == 0
@@ -211,3 +215,44 @@ def test_new_unrelated_day_does_not_make_daily_packet_stale(tmp_path):
     paths, extra, packet = fixture(tmp_path)
     write_jsonl(paths.normalized_event_path("2026-04-03"), [])
     assert inspect_packet(packet)["input_status"] == "unchanged"
+
+
+@pytest.mark.parametrize("coverage", [False, True])
+def test_single_root_records_coverage_hash_and_reuses_unchanged_packet(tmp_path, coverage):
+    paths, extra, packet = fixture(tmp_path, multi=False, coverage=coverage)
+    manifest = paths.state / "rebuild/manifest.jsonl"
+    metadata = json.loads((packet / "packet.json").read_text())
+    assert metadata["coverage_path"] == str(manifest)
+    assert metadata["coverage_sha256"] == (
+        hashlib.sha256(manifest.read_bytes()).hexdigest() if coverage else None
+    )
+    before = unchanged(packet)
+    report = inspect_packet(packet)
+    assert report["input_status"] == "unchanged"
+    assert report["inputs"][0]["coverage_status"] == ("unchanged" if coverage else "absent")
+    assert prepare_journal(paths, day=DAY, author="Fixture") == packet
+    assert unchanged(packet) == before
+
+
+@pytest.mark.parametrize("target", ["packet", "revision"])
+def test_legacy_single_root_remains_unverifiable_without_rewriting(tmp_path, target):
+    paths, extra, packet = fixture(tmp_path, multi=False)
+    metadata = json.loads((packet / "packet.json").read_text())
+    metadata.pop("coverage_path", None)
+    metadata.pop("coverage_sha256", None)
+    content = json.dumps(metadata, sort_keys=True) + "\n"
+    legacy = tmp_path / "legacy" / hashlib.sha256(content.encode()).hexdigest()
+    legacy.mkdir(parents=True)
+    (legacy / "packet.json").write_text(content)
+    for name in ("events.jsonl", "prompt.org"):
+        (legacy / name).write_bytes((packet / name).read_bytes())
+    revision = save_journal(paths, packet_dir=legacy, body="Evidence.[fn:evt_one]", model="fake")
+    before = {**unchanged(legacy), **unchanged(revision.parent)}
+    value = legacy if target == "packet" else revision
+    command = ["journal", "inspect", "--" + target, str(value)]
+    runner = CliRunner()
+    result = runner.invoke(app, command)
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["input_status"] == "unverifiable"
+    assert runner.invoke(app, command + ["--require-current"]).exit_code == 1
+    assert {**unchanged(legacy), **unchanged(revision.parent)} == before

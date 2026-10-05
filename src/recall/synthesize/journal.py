@@ -272,7 +272,12 @@ def prepare_journal(
                 raise ValueError(f"Journal input changed during preparation: {file}")
         source = paths.normalized_event_path(day)
         provenance = (
-            {"normalized_inputs": inputs, "event_origins": origins} if len(roots) > 1 else {}
+            {"normalized_inputs": inputs, "event_origins": origins}
+            if len(roots) > 1
+            else {
+                "coverage_path": inputs[0]["coverage_path"],
+                "coverage_sha256": inputs[0]["coverage_sha256"],
+            }
         )
         packet = _json(
             {
