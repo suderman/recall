@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -27,6 +28,7 @@ from recall.connectors.telegram.tdlib import (
 )
 from recall.storage.paths import RecallPaths
 from recall.storage.state import get_connector_cursor, list_connector_cursors
+from recall.voice_corpus import after_publication
 
 DEFAULT_DAEMON_POLL_SECONDS = 5.0
 DEFAULT_DAEMON_IDLE_SLEEP_SECONDS = 2.0
@@ -482,6 +484,12 @@ def drain_telegram_pending(
 
 def normalize_telegram(
     date: str = typer.Option(..., "--date", help="Date to normalize in YYYY-MM-DD format."),
+    voice_policy: Path | None = typer.Option(
+        None, "--voice-policy", help="Opt in to local voice collection after publication."
+    ),
+    voice_account: str | None = typer.Option(
+        None, "--voice-account", help="Explicit account for voice collection only."
+    ),
     root: Path | None = typer.Option(
         None,
         "--root",
@@ -493,6 +501,11 @@ def normalize_telegram(
 ) -> None:
     """Normalize one day of captured Telegram raw updates."""
 
+    if (voice_policy is None) != (voice_account is None) or (
+        voice_account is not None
+        and (not voice_account.strip() or voice_account != voice_account.strip())
+    ):
+        raise typer.BadParameter("Use --voice-policy with an explicit nonblank --voice-account")
     paths = _paths_for(root)
     paths.ensure_directories()
     event_path, artifact_path = normalize_telegram_day(paths, date=date)
@@ -503,6 +516,14 @@ def normalize_telegram(
         f"next_step=run 'recall entities sync telegram --date {date}' or "
         f"'recall artifacts show --date {date} --source telegram'"
     )
+    if voice_policy is not None:
+        assert voice_account is not None
+        report = after_publication(
+            paths, day=date, source="telegram", account=voice_account, policy_path=voice_policy
+        )
+        typer.echo("voice=" + json.dumps(report, ensure_ascii=True, sort_keys=True))
+        if not report["verified_current"]:
+            raise typer.Exit(1)
 
 
 def sync_telegram_entities(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from zoneinfo import ZoneInfoNotFoundError
 
@@ -18,6 +19,11 @@ def rebuild(
     root: Path | None = typer.Option(None, "--root", help="Authoritative input workspace."),
     timezone_name: str = typer.Option("UTC", "--timezone", help="IANA event-day timezone."),
     account: str | None = typer.Option(None, "--account", help="Limit replacement to one account."),
+    voice_policy: Path | None = typer.Option(
+        None,
+        "--voice-policy",
+        help="Opt in to local collection after publication; requires --account.",
+    ),
 ) -> None:
     """Rebuild from local evidence only. No remote capture or canonical-store writes."""
     try:
@@ -29,6 +35,7 @@ def rebuild(
             sources=source,
             timezone_name=timezone_name,
             account=account,
+            voice_policy=voice_policy,
         )
     except (ValueError, OSError, ZoneInfoNotFoundError) as exc:
         typer.echo(str(exc), err=True)
@@ -37,5 +44,10 @@ def rebuild(
         typer.echo(f"{job['date']} {job['source']}: {job['status']} ({job['event_count']} events)")
         if job["error"]:
             typer.echo(job["error"], err=True)
-    if any(job["status"] in {"failed", "unsupported"} for job in jobs):
+        if "voice" in job:
+            typer.echo("voice=" + json.dumps(job["voice"], ensure_ascii=True, sort_keys=True))
+    if any(job["status"] in {"failed", "unsupported"} for job in jobs) or (
+        voice_policy is not None
+        and any(not job.get("voice", {}).get("verified_current", False) for job in jobs)
+    ):
         raise typer.Exit(1)

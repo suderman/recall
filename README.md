@@ -76,6 +76,17 @@ Results cite saved evidence. Person lookup keeps ambiguous identities separate.
 The index is a snapshot; inspect its date bounds and freshness before treating
 an empty result as meaningful. See [search and recall](docs/usage.md#search-and-recall).
 
+`recall voice candidates` reviews possible self-authored email passages with
+explicit sender IDs and date bounds. Native Telegram plain-text review also
+requires `--source telegram --account ACCOUNT`. Candidates remain ineligible.
+`recall voice collect` can maintain private local samples under an explicit
+ownership and original-writing policy; `recall voice inspect --require-current`
+checks them against current saved evidence and policy. Email/Telegram normalization
+and replay can opt in with `--voice-policy`; collection stays off by default.
+Checked replay receipts support removed or empty contributions. Profiles and
+voice-based rewriting are not implemented. See [candidate review](docs/usage.md#review-voice-candidates)
+and [local collection](docs/usage.md#collect-local-voice-samples).
+
 ## Rebuild without changing the archive
 
 Replay saved captures into a separate workspace. Email and calendar, when

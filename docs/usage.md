@@ -264,6 +264,259 @@ its Nix environment, not an unrelated `RECALL_ROOT`. It permits only query,
 person and project lookup, with no ingestion or index override. It is not a
 security sandbox. Agents must disclose stale evidence and keep identities separate.
 
+## Review voice candidates
+
+The voice candidate command is an offline, read-only review. By default it reads
+saved normalized email events and their original MIME messages, not an index or
+live inbox:
+
+```bash
+recall voice candidates --root /path/to/archive \
+  --identity ident_email_alex_example_org --account work \
+  --from 2026-09-28 --to 2026-10-04 --limit 20
+```
+
+Choose sender identity IDs explicitly; repeat `--identity` for another identity.
+Names, recipients, participants and person resolutions do not select authors.
+Both date bounds are required. `--limit` bounds displayed records, including
+exclusions; `truncated` and `missing_days` describe report limits, not coverage.
+Output is JSON and may contain private writing. Keep saved reports owner-only.
+The command creates no folders, updates no SQLite state and calls no model.
+
+### Email
+
+A reviewable email passage requires matching raw Message-ID, sender identity and
+plain body text. Reports include the normalized physical line/file hash, resolved raw
+path/hash, decoded MIME-part index, body hash and passage offsets/hash. Offsets
+are zero-based Unicode characters in that decoded part, with an exclusive end.
+Existing relocation maps and unique Maildir flag renames remain supported.
+
+Only a leading passage is proposed. Recognized quoted/forwarded tails and
+signature blocks are omitted, with offset ranges and reasons rather than their
+contents. Extractor version 2 also omits isolated final paragraphs matching the
+raw sender's display name or its first word as possible sign-offs, without removing
+names inside ordinary prose. Indented closings are supported. Unrecognized
+sender-attribution lines and image placeholders in the proposed prefix reject
+the whole candidate rather than guessing an original/quoted boundary. Earlier
+reports keep their recorded extractor version and are never upgraded in place.
+
+Inline answers after a quote are not recovered. Unknown reply/forward
+boundaries, quotation marks inside the proposed passage, HTML-only or multiple
+plain bodies, malformed/mismatched raw evidence and unsupported sources are
+excluded. Without an explicit `--source telegram`, chat records remain unsupported.
+Journal records are always unsupported.
+
+### Native Telegram
+
+Telegram review requires an explicit source, account, sender identity and both
+date bounds. These placeholder values are not identity or authorship approvals:
+
+```bash
+recall voice candidates --root /path/to/archive --source telegram \
+  --account personal --identity ident_telegram_user_123 \
+  --from 2026-09-28 --to 2026-10-04 --limit 20
+```
+
+Only saved native `updateNewMessage` envelopes from `tdlib-once`, `tdlib-run`,
+`tdlib-daemon` or `pending-offline` captures are supported. The selected raw
+physical line must match the account, message/chat IDs, recomputed event ID,
+user sender ID, timestamp, conversation and exact normalized text. The raw
+payload must include exactly one matching sender user with `userTypeRegular`.
+Missing user metadata does not establish that the sender is human. Outgoing
+flags, participants, display names and channel ownership cannot select self.
+
+Extractor version 1 proposes the whole verified `messageText` body, without
+trimming or splitting it. Passage offsets are zero-based Unicode characters in
+that raw body, with an exclusive end. Reports include resolved raw path/file hash,
+physical line/record hash, sender ID and body/passage hashes. Raw and normalized
+inputs must remain unchanged during inspection. Existing relocation maps apply.
+
+Desktop imports, file-backed/manual capture modes, channel senders, forwards,
+bot users or bot-origin messages, service content and media captions are excluded.
+The body must have an empty formatted-entity list. Quote/code entities and all
+other formatting are excluded rather than converting TDLib's UTF-16 offsets.
+Literal quotation, forwarding and code markers also exclude the whole body.
+An ordinary reply may propose its own plain body; reply linkage alone does not
+make it quoted history. Links are text and are never fetched.
+
+### Review limits
+
+Automated/bulk mail and records tagged `generated`, `ai_generated` or
+`ai_assisted` are excluded. Use repeatable `--exclude-event EVENT_ID` for known
+model-written or otherwise unsuitable records. Absence of a tag does not prove
+human authorship, and Recall does not detect AI assistance automatically.
+
+Every result is either `needs_review` or `excluded`, always with
+`corpus_eligible: false`. Candidate selection is not authorship confirmation.
+Only human-confirmed original writing may enter a corpus. This command does not
+build a profile, rewrite text, change journal prompts or admit samples.
+
+## Collect local voice samples
+
+Collection reads saved normalized and raw evidence only. It does not capture
+messages, query accounts, change SQLite, run a model or change journal prompts.
+It supports the email and native Telegram extractors described above. Unlike
+candidate review, it can admit text under an explicit original-writing policy.
+Account ownership and a matching sender alone do not prove human composition.
+
+Create an owner-only JSON policy, then select one day, source and account:
+
+```bash
+chmod 600 /path/to/private-policy.json
+recall voice collect --root /path/to/archive --date YYYY-MM-DD \
+  --source telegram --account ACCOUNT --policy /path/to/private-policy.json
+recall voice inspect --root /path/to/archive --date YYYY-MM-DD --require-current
+```
+
+These commands are syntax examples, not approval of any identity or origin window.
+There is no default identity, grant or policy path. The policy must be a regular
+file owned by the current user, with no group or other permissions. Symlink
+policies are rejected. This empty policy admits nothing:
+
+```json
+{
+  "format": "recall-voice-policy-v1",
+  "ownerships": [],
+  "origin_grants": [],
+  "denials": [],
+  "exclude_events": []
+}
+```
+
+All fields are required except the optional grant `span`. Unknown fields and
+duplicate JSON keys are rejected.
+
+Each `ownerships` object requires:
+
+- `id`: a unique policy ownership ID.
+- `source`: `email` or `telegram`.
+- `account`: the exact normalized source account.
+- `identity`: the exact sender identity ID, not a person ID or display name.
+- `from` and `to`: UTC timestamps with `Z` or `+00:00`, both inclusive. Date-only
+  values and reversed bounds are rejected.
+- `conversations`: `null` for all conversations in that scope, or a nonempty list
+  of exact normalized conversation IDs.
+
+Each `origin_grants` object requires `id`, `ownership_id`, `from`, `to`,
+`conversations` and `assertion`. Grant IDs must be unique. `ownership_id` must name
+an ownership object. Grant time and conversation bounds cannot exceed that
+ownership. The literal assertion `original-human-unassisted` records the user's
+confirmation that qualifying prose in this context and time window is original
+writing, without AI drafting, AI rewriting or copied third-party text, except
+excluded events. Recall does not independently verify that assertion. Do not add
+it when composition is uncertain.
+
+An optional `span` restricts a grant to one exact extractor proposal. Its required
+fields are `event_id`, `body_sha256`, `start`, `end`, `sha256` and
+`extractor_version`. Offsets are zero-based Unicode characters with an exclusive
+end. The hashes, offsets and version must match the current proposal exactly.
+This is not a custom excerpt selector. A receipt for an old body does not approve
+an edit, even when the event ID stays the same.
+
+Each `denials` object has the same fields as an ownership object, with a unique
+ID within the denial list. It denies composition approval within that scope.
+`exclude_events` is a list of event IDs that must stay out. Denials, exclusions,
+generated/assisted tags and extractor exclusions override grants. Multiple
+matching ownerships or origin grants exclude the affected event rather than
+choosing one. A clean candidate without a matching grant remains `needs_review`.
+
+Collection writes `data/derived/voice/YYYY/YYYY-MM-DD.json`. Decisions and eligible
+spans share one atomic day file. Voice directories are mode `0700`; files are
+mode `0600`. Existing public or symlink outputs are rejected, not repaired by
+changing their permissions. The file retains other source/account scopes when
+one scope succeeds. Exact retries leave its bytes and modification time unchanged.
+Successful edits or policy changes replace that scope's eligible set. Span IDs
+bind source, account, event, body hash, offsets and extractor version. Appending
+unrelated raw evidence changes snapshot hashes, not the span's identity.
+
+Eligible records retain private prose and physical provenance, including normalized
+line/record/file hashes, raw references and selected raw hashes, body/span hashes,
+and ownership/grant hashes. Email records also retain decoded MIME-part context.
+Review and excluded records do not retain passage text. Treat the entire file as
+private even when every passage is omitted. CLI summaries and freshness inspection
+do not print sample text.
+
+The collector checks the full selected saved day scope without a display limit.
+Missing, incomplete, malformed, changing or unverifiable inputs leave the prior
+day result unchanged and fail the command. An empty or absent source/account
+contribution is not a deletion receipt and also fails. Removing events from an
+existing scope fails even when the shorter input is valid JSONL. A complete-line
+truncation cannot establish that those events were deleted. A successful scoped
+replay receipt can authorize removal or an empty contribution. Policy changes can
+revoke admission while the event records remain. Collection records and checks
+the supplied local snapshot, not remote capture coverage.
+
+Saved results are snapshots, not permanent freshness claims. Inspect before using
+samples. Inspection re-evaluates every retained scope against current policy and
+evidence and detects changed admissions as well as changed hashes. `--require-current`
+returns a nonzero exit status if any scope cannot be verified current. The
+collector's successful summary verifies only the selected scope; retained scopes
+may need their own reconciliation. Failed collection does not make old eligible
+records safe to use. Keep one writer per workspace; concurrent collection is
+rejected by the voice writer lock. Profiles and voice-based rewrites are not
+implemented.
+
+### Replay receipts and opt-in collection
+
+A replay manifest records successful publication of a selected contribution.
+Supply it with `--coverage` when collecting from that replay output:
+
+```bash
+recall voice collect --root /path/to/replay-output --date YYYY-MM-DD \
+  --source telegram --account ACCOUNT --policy /path/to/private-policy.json \
+  --coverage /path/to/replay-output/data/state/rebuild/manifest.jsonl
+```
+
+The receipt must come from this output workspace's existing replay manifest.
+Its job must select the exact source, explicit account and day and have status
+`success`, `captured-empty` for Telegram or `queried-empty` for email. The saved
+contribution snapshot and count must match the current normalized scope exactly.
+Telegram receipts also require unchanged recorded raw input hashes and, for an
+empty contribution, saved capture-day evidence. Missing, failed or unsupported
+jobs cannot authorize deletion. Manifest, contribution and input snapshot files
+must be owner-only regular files. The collector checks receipts and saved inputs
+again before publication. It never creates or repairs a receipt.
+
+An empty receipt replaces that scope's records with an empty list, retaining
+other scopes. A receipt for a shorter successfully published contribution can
+remove old events. A shortened normalized file alone still fails. Inspection
+rechecks the receipt and its snapshots; later changes make the result unverified.
+An unrelated manifest job does not invalidate a still-matching scope receipt.
+Receipts describe saved local replay publication, not complete remote history or
+a fresh query of the current Maildir. New capture or later authoritative-store
+changes still need normalization or replay.
+
+Collection is off by default. These commands opt in after successful publication:
+
+```bash
+recall normalize email --root /path/to/archive --date YYYY-MM-DD \
+  --account ACCOUNT --voice-policy /path/to/private-policy.json
+recall normalize telegram --root /path/to/archive --date YYYY-MM-DD \
+  --voice-account ACCOUNT --voice-policy /path/to/private-policy.json
+recall rebuild --root /path/to/archive --output-root /path/to/replay-output \
+  --from YYYY-MM-DD --to YYYY-MM-DD --source telegram --account ACCOUNT \
+  --voice-policy /path/to/private-policy.json
+```
+
+Email normalization requires an explicit `--account` when opting in. Telegram's
+`--voice-account` selects collection only; normalization still publishes all
+captured accounts as before. Replay opt-in requires an explicit `--account` and
+only email or Telegram sources. Replay queries email through its existing local
+notmuch path; voice collection itself never queries an account.
+
+Normalizers merge events and provide no deletion receipt. Their hooks cannot
+remove absent events or admit an empty scope. Replay publishes scoped replacement
+and passes its checked receipt to the same collector. Hooks run only after durable
+normalized output, and for replay after the manifest is written. They never run
+on raw capture, cursor updates, staging output or unsuccessful replay jobs.
+
+An opted-in command prints a separate `voice=` JSON summary without sample prose.
+If collection fails, the command exits nonzero while already published normalized
+evidence and replay status remain intact. The previous voice result is retained
+and must not be used without current inspection. Voice summaries are not written
+into replay manifests. Without these options, publication and CLI output are
+unchanged. No timer, capture listener, model call or profile build is added.
+
 ## Identities and attachments
 
 Sync source identities before reviewing matches. Manual overrides belong in

@@ -40,6 +40,9 @@ from recall.cli.search import (
     status as search_status,
 )
 from recall.cli.timeline import build_timeline
+from recall.cli.voice import candidates as voice_candidates
+from recall.cli.voice import collect as voice_collect
+from recall.cli.voice import inspect as inspect_voice
 from recall.config import resolve_root
 from recall.connectors.asana.cli import (
     import_asana_export_bundle,
@@ -87,6 +90,7 @@ events_app = typer.Typer(help="Inspect normalized events.")
 timeline_app = typer.Typer(help="Build deterministic Org evidence timelines.")
 journal_app = typer.Typer(help="Generate readable journals and preserve cited revisions.")
 search_app = typer.Typer(help="Search history and inspect person/project evidence.")
+voice_app = typer.Typer(help="Inspect writing and collect private local samples without a model.")
 artifacts_app = typer.Typer(help="Inspect normalized artifact metadata.")
 artifacts_download_app = typer.Typer(help="Download source-native artifact bytes.")
 entities_app = typer.Typer(help="Manage identity and entity storage.")
@@ -107,6 +111,7 @@ app.add_typer(events_app, name="events")
 app.add_typer(timeline_app, name="timeline")
 app.add_typer(journal_app, name="journal")
 app.add_typer(search_app, name="search")
+app.add_typer(voice_app, name="voice")
 app.add_typer(artifacts_app, name="artifacts")
 app.add_typer(entities_app, name="entities")
 app.add_typer(state_app, name="state")
@@ -208,6 +213,9 @@ search_app.command("query")(search_history)
 search_app.command("status")(search_status)
 search_app.command("person")(recall_person)
 search_app.command("project")(recall_project)
+voice_app.command("candidates")(voice_candidates)
+voice_app.command("collect")(voice_collect)
+voice_app.command("inspect")(inspect_voice)
 events_app.command("show")(show_events)
 events_app.command("overlaps")(show_overlaps)
 artifacts_app.command("show")(show_artifacts)

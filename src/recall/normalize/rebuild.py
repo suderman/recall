@@ -174,6 +174,7 @@ def rebuild_range(
     sources: list[str],
     timezone_name: str = "UTC",
     account: str | None = None,
+    voice_policy: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Replay saved captures and explicitly selected local queries, one writer at a time.
 
@@ -186,6 +187,13 @@ def rebuild_range(
     day_bounds(first, timezone_name)
     if not sources or len(sources) != len(set(sources)) or set(sources) - set(SOURCES):
         raise ValueError(f"Choose distinct sources from {', '.join(SOURCES)}")
+    if voice_policy is not None and (
+        account is None
+        or not account.strip()
+        or account != account.strip()
+        or set(sources) - {"email", "telegram"}
+    ):
+        raise ValueError("Voice collection requires an explicit account and email/telegram sources")
     if inputs.root.is_relative_to(output.root) or output.root.is_relative_to(inputs.root):
         raise ValueError("Input and output roots must be separate, non-overlapping workspaces")
     output.ensure_directories()
@@ -193,7 +201,7 @@ def rebuild_range(
     state.mkdir(exist_ok=True)
     with (state / "writer.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return _rebuild(inputs, output, days, sources, timezone_name, account, state)
+        return _rebuild(inputs, output, days, sources, timezone_name, account, state, voice_policy)
 
 
 def _rebuild(
@@ -204,10 +212,12 @@ def _rebuild(
     timezone_name: str,
     account: str | None,
     state: Path,
+    voice_policy: Path | None,
 ) -> list[dict[str, Any]]:
     manifest_path = state / "manifest.jsonl"
     previous = read_jsonl(manifest_path) if manifest_path.exists() else []
     jobs = {(row["source"], row["date"]): row for row in previous}
+    voice_reports: dict[tuple[str, str], dict[str, Any]] = {}
     code = {
         path.relative_to(Path(__file__).parents[1]).as_posix(): file_hash(path)
         for path in sorted(Path(__file__).parents[1].rglob("*.py"))
@@ -384,4 +394,28 @@ def _rebuild(
                     )
                 jobs[(source, day)] = job
                 write_jsonl(manifest_path, [jobs[key] for key in sorted(jobs)])
-    return [jobs[(source, day)] for day in days for source in sources]
+                if voice_policy is not None and status in {
+                    "success",
+                    "captured-empty",
+                    "queried-empty",
+                }:
+                    # Import here: the collector uses date_range from this module.
+                    from recall.voice_corpus import after_publication
+
+                    assert account is not None
+                    voice_reports[(source, day)] = after_publication(
+                        output,
+                        day=day,
+                        source=source,
+                        account=account,
+                        policy_path=voice_policy,
+                        coverage_path=manifest_path,
+                    )
+    return [
+        {
+            **jobs[(source, day)],
+            **({"voice": voice_reports[(source, day)]} if (source, day) in voice_reports else {}),
+        }
+        for day in days
+        for source in sources
+    ]
