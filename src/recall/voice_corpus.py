@@ -240,7 +240,9 @@ def _coverage(
     if bool(expected) != (job["status"] == "success"):
         raise ValueError("Replay status does not match contribution")
     if source == "telegram":
-        if not expected and job["capture_day_present"] is not True:
+        if not expected and (
+            type(job["capture_day_present"]) is not bool or not job["capture_day_present"]
+        ):
             raise ValueError("Empty replay lacks saved capture-day evidence")
         fingerprint = job["fingerprint"]
         _text(fingerprint)
@@ -316,6 +318,7 @@ def _evaluate(
     if not events and coverage is None:
         raise ValueError("No selected source/account contribution")
     raw_inputs: dict[Path, bytes] = {}
+    proof_inputs: dict[Path, bytes] = {}
     owners: dict[str, list[dict[str, Any]]] = {}
     blocked: dict[str, str] = {}
     identities: set[str] = set()
@@ -384,6 +387,12 @@ def _evaluate(
                 },
             )
         )
+        for proof in item.get("proof_inputs", []):
+            path = Path(proof["path"])
+            content = _read_private(path)
+            if _hash(content) != proof["sha256"] or (path in watched and watched[path] != content):
+                raise ValueError("Source proof changed after extraction")
+            watched[path] = proof_inputs[path] = content
         item["normalized_record_sha256"] = _hash(raw_line)
         item["conversation_id"] = event.get("conversation_id")
         item["extractor_version"] = VERSIONS[source]
@@ -452,13 +461,20 @@ def _evaluate(
     }
     if coverage is not None:
         scope["coverage"] = coverage
-    _unchanged(watched, paths.state / "rebuild")
+    if proof_inputs:
+        scope["proof_inputs"] = [
+            {"path": str(path), "sha256": _hash(content)}
+            for path, content in sorted(proof_inputs.items())
+        ]
+    _unchanged(watched, paths.state / "rebuild", set(proof_inputs))
     return scope, watched
 
 
-def _unchanged(watched: dict[Path, bytes], private_root: Path) -> None:
+def _unchanged(
+    watched: dict[Path, bytes], private_root: Path, private_paths: set[Path] | None = None
+) -> None:
     for path, data in watched.items():
-        if path.is_relative_to(private_root):
+        if path.is_relative_to(private_root) or path in (private_paths or set()):
             _private(path)
         if path.read_bytes() != data:
             raise ValueError("Input changed during collection")
@@ -558,7 +574,11 @@ def collect(
             }
             content = _json(value) + "\n"
             _private(policy_path)
-            _unchanged(watched, paths.state / "rebuild")
+            _unchanged(
+                watched,
+                paths.state / "rebuild",
+                {Path(proof["path"]) for proof in scope.get("proof_inputs", [])},
+            )
             if content.encode() != old:
                 write_text_atomic(target, content)
         return {
@@ -620,6 +640,7 @@ def inspect_day(paths: RecallPaths, *, day: str) -> dict[str, Any]:
         saved, data = _read_day(target, day)
         watched = {target: data}
         policy_paths: set[Path] = set()
+        private_paths: set[Path] = set()
         for entry in saved["scopes"]:
             current = False
             try:
@@ -637,6 +658,7 @@ def inspect_day(paths: RecallPaths, *, day: str) -> dict[str, Any]:
                 ):
                     raise ValueError("Input changed between scope inspections")
                 watched.update(inputs)
+                private_paths.update(Path(proof["path"]) for proof in fresh.get("proof_inputs", []))
                 policy_paths.add(policy_path)
                 current = fresh == entry
             except (OSError, ValueError, TypeError, KeyError, IndexError, OverflowError):
@@ -651,7 +673,7 @@ def inspect_day(paths: RecallPaths, *, day: str) -> dict[str, Any]:
         _private(target)
         for policy_path in policy_paths:
             _private(policy_path)
-        _unchanged(watched, paths.state / "rebuild")
+        _unchanged(watched, paths.state / "rebuild", private_paths)
     except (OSError, ValueError, TypeError, KeyError, IndexError, OverflowError):
         return {"path": str(target), "date": day, "verified_current": False, "scopes": []}
     return {

@@ -317,8 +317,9 @@ recall voice candidates --root /path/to/archive --source telegram \
   --from 2026-09-28 --to 2026-10-04 --limit 20
 ```
 
-Only saved native `updateNewMessage` envelopes from `tdlib-once`, `tdlib-run`,
-`tdlib-daemon` or `pending-offline` captures are supported. The selected raw
+Saved native `updateNewMessage` envelopes from `tdlib-once`, `tdlib-run`,
+`tdlib-daemon` or `pending-offline` captures are supported. Saved `tdlib-history`
+envelopes have a separate proof rule described below. The selected raw
 physical line must match the account, message/chat IDs, recomputed event ID,
 user sender ID, timestamp, conversation and exact normalized text. The raw
 payload must include exactly one matching sender user with `userTypeRegular`.
@@ -338,6 +339,33 @@ other formatting are excluded rather than converting TDLib's UTF-16 offsets.
 Literal quotation, forwarding and code markers also exclude the whole body.
 An ordinary reply may propose its own plain body; reply linkage alone does not
 make it quoted history. Links are text and are never fetched.
+
+#### Saved native history proof
+
+A `tdlib-history` envelope must honestly identify its `getChatHistoryMessage`
+shape. It is not relabelled as a delivered `updateNewMessage`. Native-history
+proof version 1 requires saved authenticated-self, private-chat/page and capture
+receipts alongside the raw message. The receipts must be owner-only regular files.
+The collector reads them through the existing relocation map and records their
+physical paths and hashes. Plaintext extractor version 1 is unchanged.
+
+The proof binds the exact native authenticated user, regular private peer, account,
+frozen capture cutoff, raw file hash and selected cohort count. It checks bounded
+`getChatHistory` queries, advancing page cursors, descending message IDs/dates,
+the recorded own-message cap or reached date boundary, and the message's exact
+page/index/body hash. Missing, ambiguous, malformed, changing or public proof is
+not an empty result and prevents collection from replacing a saved scope.
+
+These hashes bind saved local observations. They are not server signatures or
+proof of complete Telegram history. Unselected page bodies are not retained and
+cannot be reconstructed from page hashes. Authentication proves delivery identity,
+not human composition. A separate original-writing grant is still required.
+Formatting, quote, forward, bot and media exclusions apply unchanged. Exact-span
+grants do not transfer to body edits. Collection and inspection recheck receipt
+bytes and private permissions before accepting current output.
+
+This is a saved-input reader, not a new history-fetch CLI. It does not initialize
+TDLib, fetch another page, download media or extend a cohort's authorship grant.
 
 ### Review limits
 
