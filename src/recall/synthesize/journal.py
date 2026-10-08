@@ -320,6 +320,82 @@ def _load_packet(directory: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]
     return packet, read_jsonl(directory / "events.jsonl")
 
 
+def model_input(
+    directory: Path,
+    *,
+    event_ids: list[str] | None = None,
+    max_bytes: int = 128 * 1024,
+) -> tuple[str, dict[str, Any]]:
+    """Preview a bounded snapshot; never truncate text or run generation."""
+    if type(max_bytes) is not int or max_bytes < 1:
+        raise ValueError("Model input byte budget must be a positive integer")
+    directory = resolve_reference(directory)
+    files = [directory / name for name in ("packet.json", "prompt.org", "events.jsonl")]
+    before = {path: path.read_bytes() for path in files}
+    packet, events = _load_packet(directory)
+    ids = [row["event_id"] for row in events]
+    if any(
+        not isinstance(identity, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", identity)
+        for identity in ids
+    ) or len(set(ids)) != len(ids):
+        raise ValueError("Invalid or duplicate model input event IDs")
+    selected_ids = event_ids if event_ids is not None else ids
+    if not selected_ids or len(set(selected_ids)) != len(selected_ids):
+        raise ValueError("Choose nonempty, distinct event IDs")
+    if set(selected_ids) - set(ids):
+        raise ValueError("Selected event is not in the frozen packet")
+    selected = [row for row in events if row["event_id"] in selected_ids]
+    omitted = [identity for identity in ids if identity not in selected_ids]
+    view = {
+        "format": "recall-journal-model-input-v1",
+        "packet_sha256": directory.name,
+        "events_sha256": packet["events_sha256"],
+        "original_prompt_sha256": packet["prompt_sha256"],
+        "instructions": PROMPT,
+        "view_rules": (
+            "Only the selected events below are supplied. Cite only allowed_citation_markers. "
+            "Omitted events and fields remain in the full frozen packet; "
+            "do not infer their contents. "
+            "Selected text and quoted history are complete, not shortened. "
+            "This is an offline preview, not an approved model request or a freshness check."
+        ),
+        "author": packet["author"],
+        "date": packet["date"],
+        "timezone": packet["timezone"],
+        "coverage": packet["coverage"],
+        "allowed_citation_markers": [f"[fn:{row['event_id']}]" for row in selected],
+        "omitted_event_ids": omitted,
+        "omitted_event_fields": ["raw_ref", "source_urls"],
+        "events": [
+            {key: value for key, value in row.items() if key not in {"raw_ref", "source_urls"}}
+            for row in selected
+        ],
+    }
+    content = _json(view)
+    size = len(content.encode("utf-8"))
+    if any(path.read_bytes() != data for path, data in before.items()):
+        raise ValueError("Journal packet changed during model input preparation")
+    if size > max_bytes:
+        raise ValueError(
+            f"Model input uses {size} bytes; budget is {max_bytes}. "
+            "Review an explicit event selection or a larger byte budget; no text was truncated."
+        )
+    return content, {
+        "format": view["format"],
+        "date": packet["date"],
+        "packet_sha256": directory.name,
+        "events_sha256": packet["events_sha256"],
+        "model_input_sha256": _sha(content),
+        "source_events": len(events),
+        "events": len(selected),
+        "omitted_events": len(omitted),
+        "bytes": size,
+        "max_bytes": max_bytes,
+        "freshness_checked": False,
+        "model_called": False,
+    }
+
+
 def _inspect_inputs(packet: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
     """Report live drift separately from the validity of a frozen packet."""
     inputs = packet.get("normalized_inputs", [packet])

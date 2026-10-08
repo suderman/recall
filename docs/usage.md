@@ -643,6 +643,46 @@ coverage hashes cannot certify currentness. New single-root packets record those
 hashes, including a null hash for absent coverage; later creation counts as drift.
 Inspection neither rewrites old packets nor establishes capture completeness.
 
+#### Preview a bounded model input
+
+`journal input-view` previews a separate versioned JSON view. By default it prints
+only counts, hashes and byte size, not source prose. It checks the frozen packet's
+hashes, not current source freshness. Run strict inspection separately:
+
+```bash
+recall journal inspect --packet "$packet" --require-current
+recall journal input-view --packet "$packet"
+recall journal input-view --packet "$packet" \
+  --event evt_example --event evt_other --output /path/to/private/view.json
+```
+
+The default byte budget is 131,072 bytes for the encoded view. `--max-bytes` changes
+that explicit local preview budget; it is not a token estimate or model context
+limit. Over-budget views fail before export. No text is truncated. A large full
+day may still exceed the limit after removing transport fields.
+
+The view retains full selected event text, quoted history, attribution, tags,
+other normalized fields and frozen coverage warnings. It omits `raw_ref` and the
+standalone `source_urls` list; URLs already present in text are not rewritten.
+Full records and physical provenance remain in the original packet. Packet,
+evidence and original prompt hashes bind the view to that snapshot. Citation
+markers refer only to selected event IDs. Original packet instructions are not
+modified; the view carries the current versioned journal template separately.
+
+Without `--event`, every event is selected. Repeating `--event` makes selection
+explicit and lists every omitted event ID. Unknown or duplicate IDs fail. No
+marketing classifier silently removes events, and omitted content must not be
+inferred. Review selection for factual gaps before any later generation.
+
+Exports require an owner-only directory and create mode `0600` files. Public or
+symlink files are rejected. Export inside packet/evidence data directories is
+refused. A writer lock and atomic replacement protect the output. Exact retries
+leave bytes and mtime unchanged; edited files are never overwritten.
+
+This command does not call a model or change `journal build`/`run`, cache
+fingerprints, accepted packets or revisions. Connecting this preview to generation
+and approving any new transmission remain separate steps.
+
 For an externally drafted body, save a cited revision without a model call:
 
 ```bash

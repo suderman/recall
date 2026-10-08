@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import stat
 import subprocess
 from contextlib import ExitStack
 from pathlib import Path
@@ -21,8 +23,59 @@ from recall.synthesize.generate import (
     build_journals,
     publish_journal,
 )
-from recall.synthesize.journal import inspect_packet, prepare_journal, save_journal
+from recall.synthesize.journal import (
+    _load_packet,
+    _write_once,
+    inspect_packet,
+    model_input,
+    prepare_journal,
+    save_journal,
+)
 from recall.synthesize.run import run_journals
+
+
+def _private_view_path(path: Path, *, directory: bool = False) -> None:
+    info = path.lstat()
+    kind_matches = stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)
+    if not kind_matches or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError("Model input exports require owner-only regular files and directories")
+
+
+def input_view(
+    packet: Path = typer.Option(..., "--packet"),
+    event: list[str] | None = typer.Option(None, "--event", help="Explicit event ID; repeat."),
+    max_bytes: int = typer.Option(128 * 1024, "--max-bytes", min=1),
+    output: Path | None = typer.Option(
+        None, "--output", help="Private JSON export; never overwrite edits."
+    ),
+) -> None:
+    """Preview a bounded input as counts/hashes; export only on explicit request. No model call."""
+    try:
+        content, summary = model_input(packet, event_ids=event, max_bytes=max_bytes)
+        if output is not None:
+            target = output.expanduser().absolute()
+            target = target.parent.resolve() / target.name
+            metadata, _ = _load_packet(packet)
+            roots = [Path(metadata["normalized_path"]).parents[3]]
+            roots += [Path(row["root"]) for row in metadata.get("normalized_inputs", [])]
+            if any(
+                target.is_relative_to(resolve_reference(root).resolve() / "data") for root in roots
+            ):
+                raise ValueError("Export must be outside packet and evidence data directories")
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            _private_view_path(target.parent, directory=True)
+            lock_path = target.parent / ".journal-input-view.lock"
+            descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(descriptor, "a") as lock:
+                _private_view_path(lock_path)
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if target.exists() or target.is_symlink():
+                    _private_view_path(target)
+                _write_once(target, content)
+            summary["output"] = str(target)
+        typer.echo(json.dumps(summary, ensure_ascii=True, sort_keys=True))
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def run(

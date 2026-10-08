@@ -22,6 +22,7 @@ from recall.cli.entities import (
 )
 from recall.cli.events import show_events, show_overlaps
 from recall.cli.journal import build as build_journals
+from recall.cli.journal import input_view as preview_journal_input
 from recall.cli.journal import inspect as inspect_journal
 from recall.cli.journal import prepare as prepare_journal
 from recall.cli.journal import publish as publish_journal
@@ -206,6 +207,7 @@ journal_app.command("run")(run_journals)
 journal_app.command("build")(build_journals)
 journal_app.command("prepare")(prepare_journal)
 journal_app.command("inspect")(inspect_journal)
+journal_app.command("input-view")(preview_journal_input)
 journal_app.command("save")(save_journal)
 journal_app.command("publish")(publish_journal)
 search_app.command("index")(build_search_index)
