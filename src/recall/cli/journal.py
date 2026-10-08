@@ -153,6 +153,15 @@ def build(
     regenerate: bool = typer.Option(False, "--regenerate"),
     root: Path | None = typer.Option(None, "--root"),
     include_root: list[Path] | None = typer.Option(None, "--include-root"),
+    input_view: Path | None = typer.Option(
+        None, "--input-view", help="Opt in to one explicit exported view; one day only."
+    ),
+    max_input_bytes: int | None = typer.Option(
+        None,
+        "--max-input-bytes",
+        min=1,
+        help="Selected mode: UTF-8 user plus system prompt budget (default 131072).",
+    ),
 ) -> None:
     """Generate cited journals through Pi; resume cached days and protect manual edits."""
     try:
@@ -166,6 +175,8 @@ def build(
             model=model,
             regenerate=regenerate,
             include_roots=[RecallPaths.from_root(path) for path in include_root or []],
+            input_view=input_view,
+            max_input_bytes=max_input_bytes,
         )
     except (ValueError, OSError, ZoneInfoNotFoundError, subprocess.TimeoutExpired) as exc:
         typer.echo(str(exc), err=True)

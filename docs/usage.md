@@ -679,9 +679,53 @@ symlink files are rejected. Export inside packet/evidence data directories is
 refused. A writer lock and atomic replacement protect the output. Exact retries
 leave bytes and mtime unchanged; edited files are never overwritten.
 
-This command does not call a model or change `journal build`/`run`, cache
-fingerprints, accepted packets or revisions. Connecting this preview to generation
-and approving any new transmission remain separate steps.
+Preview/export does not call a model or change accepted packets or revisions.
+The opt-in generation route below is separate. Approve the selected evidence,
+model route and transmission before running it.
+
+#### Generate from one selected view
+
+`journal build --input-view` opts in to one explicit exported view for one day.
+It does not choose events, trim quoted history or split a day into model calls.
+After approving transmission, use the same root, ordered include-roots, date,
+author and timezone that produced the view's packet:
+
+```bash
+recall journal build --root /path/to/replay \
+  --from 2026-03-31 --to 2026-03-31 --author "Your name" \
+  --timezone America/Edmonton --output /path/to/private/previews \
+  --input-view /path/to/private/view.json --max-input-bytes 131072
+```
+
+The view must be an owner-only regular file in canonical exported form. Its
+packet, selected events, complete text, attribution, coverage, citation markers
+and current instructions must match. Changed, stale, public or symlink views
+fail before runner startup. This mode also requires unchanged normalized/coverage
+inputs and resolved citations. Use the documented relocation map when needed.
+
+The default generation budget is 131,072 bytes for the sum of the UTF-8 user and
+system prompts, including the selected-input wrapper. `--max-input-bytes` changes
+that explicit budget. It is not a token limit, price estimate or measurement of
+provider framing. A view that fits preview's `--max-bytes` may still exceed the
+assembled generation budget. Failure leaves the previous published journal intact.
+
+Each selected revision keeps its exact private `model-input.json`. Generation
+metadata binds the view hash, selected IDs and original request budget. Cache
+identity binds the view and selection, separately from the legacy route. The
+current byte limit is checked before cache use. Changing only a passing limit
+can reuse existing content without another model call; the revision keeps the
+original call's budget. Identical view bytes at a different path can also reuse
+the same cache. Old instructions remain
+frozen with saved revisions; they are not upgraded during inspection or publication.
+The generated Evidence section states selected and omitted counts. The renderer
+rejects citations to omitted events, even when those events exist in the full
+packet. Reviewing a body through `journal publish --draft` preserves that rule
+and the original view. Rejected drafts retain their view alongside failure metadata.
+
+Without `--input-view`, the legacy full-packet route remains unchanged and uncapped
+by this option. `--max-input-bytes` without a view is rejected rather than implying
+protection. `journal run` does not select or use these views. Integration tests use
+synthetic packets and fake runners; a real model request still needs approval.
 
 For an externally drafted body, save a cited revision without a model call:
 

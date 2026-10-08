@@ -5,7 +5,10 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import os
 import re
+import stat
+import sys
 from collections import Counter
 from contextlib import ExitStack
 from datetime import date
@@ -396,6 +399,38 @@ def model_input(
     }
 
 
+def _read_model_input(path: Path) -> str:
+    def private() -> None:
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise ValueError("Model input must be an owner-only regular file")
+
+    private()
+    data = path.read_bytes()
+    private()
+    if path.read_bytes() != data:
+        raise ValueError("Model input changed during reading")
+    return data.decode("utf-8")
+
+
+def _validate_model_input(directory: Path, content: str) -> dict[str, Any]:
+    """Check frozen view contents without upgrading its saved instructions."""
+    try:
+        view = json.loads(content)
+        ids = [row["event_id"] for row in view["events"]]
+        expected, _ = model_input(directory, event_ids=ids, max_bytes=sys.maxsize)
+        original = json.loads(expected)
+        for key in ("instructions", "view_rules"):
+            if not isinstance(view[key], str) or not view[key].strip():
+                raise ValueError("Invalid saved model input instructions")
+            original[key] = view[key]
+        if view != original or _json(view) != content:
+            raise ValueError("Saved model input differs from its frozen packet")
+    except (ValueError, TypeError, KeyError) as exc:
+        raise ValueError("Invalid saved model input") from exc
+    return {"format": view["format"], "sha256": _sha(content), "event_ids": ids}
+
+
 def _inspect_inputs(packet: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
     """Report live drift separately from the validity of a frozen packet."""
     inputs = packet.get("normalized_inputs", [packet])
@@ -508,6 +543,7 @@ def save_journal(
     body: str,
     model: str,
     generation_options: dict[str, Any] | None = None,
+    input_view: str | None = None,
 ) -> Path:
     """Validate citation IDs and save a revision, never overwrite previous drafts.
 
@@ -515,6 +551,16 @@ def save_journal(
     """
     packet_dir = resolve_reference(packet_dir).resolve()
     packet, events = _load_packet(packet_dir)
+    options = generation_options or {}
+    selected = None
+    metadata = options.get("model_input")
+    if metadata is not None or input_view is not None:
+        if not isinstance(metadata, dict) or input_view is None:
+            raise ValueError("Selected generation requires its saved model input")
+        checked = _validate_model_input(packet_dir, input_view)
+        if any(metadata.get(key) != value for key, value in checked.items()):
+            raise ValueError("Model input metadata differs from its saved view")
+        selected = set(checked["event_ids"])
     if not model.strip():
         raise ValueError("Record the model used to write the draft")
     # Model output is prose, not executable Org or Emacs file-local settings.
@@ -534,6 +580,8 @@ def save_journal(
     unknown = sorted(set(cited) - indexed.keys())
     if unknown:
         raise ValueError("Journal cites events outside its evidence packet: " + ", ".join(unknown))
+    if selected is not None and set(cited) - selected:
+        raise ValueError("Journal cites omitted events outside its selected model input")
     citation_groups: list[tuple[str, ...]] = []
 
     def numbered_citation(match: re.Match[str]) -> str:
@@ -566,9 +614,15 @@ def save_journal(
     counts = ", ".join(
         f"{row['event_count']} {row['source']}" for row in packet["coverage"] if row["event_count"]
     )
-    lines.append(
-        _literal(f"Generated draft based on {counts}. Timezone: {packet['timezone']}.").rstrip()
+    coverage_label = (
+        "Generated draft based on" if selected is None else "Full frozen packet contains"
     )
+    lines.append(_literal(f"{coverage_label} {counts}. Timezone: {packet['timezone']}.").rstrip())
+    if selected is not None:
+        lines.append(
+            f"Model input selected {len(selected)} of {len(events)} frozen events; "
+            f"{len(events) - len(selected)} omitted. Full evidence remains in the packet."
+        )
     gaps = [
         row["source"]
         for row in packet["coverage"]
@@ -626,7 +680,7 @@ def save_journal(
             "packet": str(packet_dir),
             "packet_sha256": packet_dir.name,
             "model": model,
-            "generation_options": generation_options or {},
+            "generation_options": options,
             "body_sha256": _sha(body),
             "citation_groups": citation_groups,
             "journal_sha256": _sha(rendered),
@@ -642,4 +696,6 @@ def save_journal(
             ("generation.json", record),
         ):
             _write_once(revision / name, content)
+        if input_view is not None:
+            _write_once(revision / "model-input.json", input_view)
     return revision / "journal.org"
