@@ -28,9 +28,19 @@ class _HTMLTextExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self._chunks: list[str] = []
+        self._hidden_tag: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"style", "script"}:
+            self._hidden_tag = tag
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == self._hidden_tag:
+            self._hidden_tag = None
 
     def handle_data(self, data: str) -> None:
-        self._chunks.append(data)
+        if self._hidden_tag is None:
+            self._chunks.append(data)
 
     def text(self) -> str:
         return " ".join(chunk.strip() for chunk in self._chunks if chunk.strip())
