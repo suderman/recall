@@ -160,7 +160,13 @@ def build(
         None,
         "--max-input-bytes",
         min=1,
-        help="Selected mode: UTF-8 user plus system prompt budget (default 131072).",
+        help="Selected/SDK mode: UTF-8 user plus system prompt budget (default 131072).",
+    ),
+    node_executable: Path | None = typer.Option(
+        None, "--node-executable", help="Explicit absolute Node executable for SDK mode."
+    ),
+    pi_sdk: Path | None = typer.Option(
+        None, "--pi-sdk", help="Explicit absolute SDK entry module; requires --node-executable."
     ),
 ) -> None:
     """Generate cited journals through Pi; resume cached days and protect manual edits."""
@@ -177,6 +183,8 @@ def build(
             include_roots=[RecallPaths.from_root(path) for path in include_root or []],
             input_view=input_view,
             max_input_bytes=max_input_bytes,
+            node_executable=node_executable,
+            pi_sdk=pi_sdk,
         )
     except (ValueError, OSError, ZoneInfoNotFoundError, subprocess.TimeoutExpired) as exc:
         typer.echo(str(exc), err=True)

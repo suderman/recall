@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -36,12 +38,17 @@ SYSTEM_PROMPT = (
 )
 
 
-def run_pi(prompt: str, model: str) -> tuple[str, dict[str, Any]]:
-    """Consume authoritative completed JSON messages, not partial streaming text."""
+def _model_route(model: str) -> tuple[str, str, str]:
     provider, separator, selected = model.partition("/")
     model_id, colon, thinking = selected.rpartition(":")
     if not separator or not colon or thinking not in {"off", "minimal", "low", "medium", "high"}:
         raise ValueError("Model must be an explicit provider/model:thinking selection")
+    return provider, model_id, thinking
+
+
+def run_pi(prompt: str, model: str) -> tuple[str, dict[str, Any]]:
+    """Legacy CLI route: model-call recovery policy is inherited from user settings."""
+    provider, model_id, thinking = _model_route(model)
     args = [
         "pi",
         "--provider",
@@ -77,12 +84,27 @@ def run_pi(prompt: str, model: str) -> tuple[str, dict[str, Any]]:
         )
     if result.returncode:
         raise ValueError(f"Pi exited with status {result.returncode}; no journal published")
+    return _pi_response(_pi_events(result.stdout), provider, model_id, thinking)
+
+
+def _pi_events(stdout: str) -> list[dict[str, Any]]:
     try:
-        events = [json.loads(line) for line in result.stdout.split("\n") if line.strip()]
+        events = [json.loads(line) for line in stdout.split("\n") if line.strip()]
     except json.JSONDecodeError as exc:
         raise ValueError("Pi returned invalid JSON; no journal published") from exc
     if any(not isinstance(row, dict) for row in events):
         raise ValueError("Pi returned invalid event records")
+    return events
+
+
+def _pi_response(
+    events: list[dict[str, Any]],
+    provider: str,
+    model_id: str,
+    thinking: str,
+    *,
+    runner: str = "pi-json-cli-v1",
+) -> tuple[str, dict[str, Any]]:
     if not any(row.get("type") == "agent_settled" for row in events):
         raise ValueError("Pi stream did not finish; no journal published")
     if any(row.get("type") == "tool_execution_start" for row in events):
@@ -114,7 +136,116 @@ def run_pi(prompt: str, model: str) -> tuple[str, dict[str, Any]]:
             "timestamp",
         )
     }
-    metadata.update(runner="pi-json-cli-v1", thinking=thinking, tools_enabled=False)
+    metadata.update(runner=runner, thinking=thinking, tools_enabled=False)
+    return body, metadata
+
+
+SDK_CONTROLS = {
+    "mode": "pi-sdk-single-request-v1",
+    "agent_retries": 0,
+    "provider_retries": 0,
+    "automatic_compaction": False,
+    "cache_warming": "off",
+    "max_stream_calls": 1,
+    "tools": False,
+    "resources": False,
+    "session_persistence": False,
+}
+
+
+def _sdk_policy(node_executable: Path | None, pi_sdk: Path | None) -> dict[str, Any]:
+    if node_executable is None or pi_sdk is None:
+        raise ValueError("SDK mode requires both --node-executable and --pi-sdk")
+    node, sdk = node_executable.expanduser(), pi_sdk.expanduser()
+    if not node.is_absolute() or not sdk.is_absolute():
+        raise ValueError("Choose absolute Node executable and SDK module paths")
+    try:
+        node, sdk = node.resolve(), sdk.resolve()
+        if not node.is_file() or not os.access(node, os.X_OK) or not sdk.is_file():
+            raise ValueError("Node executable or SDK module is unavailable")
+        adapter = Path(__file__).with_name("pi_single_request.mjs")
+        return {
+            "controls": dict(SDK_CONTROLS),
+            "node_executable": str(node),
+            "sdk_module": str(sdk),
+            "sdk_sha256": hashlib.sha256(sdk.read_bytes()).hexdigest(),
+            "adapter_sha256": hashlib.sha256(adapter.read_bytes()).hexdigest(),
+        }
+    except OSError:
+        raise ValueError("SDK runner identity could not be read") from None
+
+
+def run_pi_sdk(
+    prompt: str,
+    model: str,
+    policy: dict[str, Any],
+    max_input_bytes: int,
+) -> tuple[str, dict[str, Any]]:
+    provider, model_id, thinking = _model_route(model)
+    size = len(prompt.encode()) + len(SYSTEM_PROMPT.encode())
+    if type(max_input_bytes) is not int or max_input_bytes < 1 or size > max_input_bytes:
+        raise ValueError("SDK assembled request exceeds its input byte budget")
+    if _sdk_policy(Path(policy["node_executable"]), Path(policy["sdk_module"])) != policy:
+        raise ValueError("SDK runner identity changed before startup")
+    request = {
+        "prompt": prompt,
+        "system": SYSTEM_PROMPT,
+        "provider": provider,
+        "model_id": model_id,
+        "thinking": thinking,
+        "policy": policy,
+        "max_input_bytes": max_input_bytes,
+    }
+    env = dict(os.environ)
+    for name in (
+        "NODE_OPTIONS",
+        "PI_PACKAGE_DIR",
+        "PI_SESSION_ID",
+        "PI_SESSION_FILE",
+        "PI_PROVIDER",
+        "PI_MODEL",
+        "PI_REASONING_LEVEL",
+        "PI_CODING_AGENT_SESSION_DIR",
+    ):
+        env.pop(name, None)
+    env.update(PI_OFFLINE="1", PI_TELEMETRY="0", PI_SKIP_VERSION_CHECK="1")
+    adapter = Path(__file__).with_name("pi_single_request.mjs")
+    with TemporaryDirectory(prefix="recall-journal-sdk-") as working_directory:
+        result = subprocess.run(
+            [policy["node_executable"], str(adapter)],
+            input=json.dumps(request),
+            capture_output=True,
+            text=True,
+            cwd=working_directory,
+            env=env,
+            timeout=600,
+            check=False,
+        )
+    if result.returncode:
+        raise ValueError(
+            f"Pi SDK runner exited with status {result.returncode}; no journal published"
+        )
+    if _sdk_policy(Path(policy["node_executable"]), Path(policy["sdk_module"])) != policy:
+        raise ValueError("SDK runner identity changed during generation")
+    events = _pi_events(result.stdout)
+    if (
+        [row.get("type") for row in events]
+        != ["runner_policy", "message_end", "agent_settled", "runner_complete"]
+        or events[0] != {"type": "runner_policy", "policy": policy}
+        or type(events[-1].get("stream_calls")) is not int
+        or events[-1] != {"type": "runner_complete", "stream_calls": 1}
+    ):
+        raise ValueError("Pi SDK single-request policy was not satisfied")
+    try:
+        body, metadata = _pi_response(
+            events, provider, model_id, thinking, runner=SDK_CONTROLS["mode"]
+        )
+    except (KeyError, TypeError, AttributeError):
+        raise ValueError("Pi SDK returned an invalid assistant response") from None
+    metadata.update(
+        runner_policy=policy,
+        runner_request={"request_bytes": size, "max_request_bytes": max_input_bytes},
+    )
     return body, metadata
 
 
@@ -157,7 +288,11 @@ def _prompt(packet_dir: Path, input_view: str | None = None) -> str:
 
 
 def _fingerprint(
-    packet_dir: Path, model: str, prompt: str, model_input_metadata: dict[str, Any] | None = None
+    packet_dir: Path,
+    model: str,
+    prompt: str,
+    model_input_metadata: dict[str, Any] | None = None,
+    runner_policy: dict[str, Any] | None = None,
 ) -> str:
     record: dict[str, Any] = {
         "packet": packet_dir.name,
@@ -170,6 +305,9 @@ def _fingerprint(
         record["model_input"] = {
             key: model_input_metadata[key] for key in ("format", "sha256", "event_ids")
         }
+    if runner_policy is not None:
+        record["runner"] = SDK_CONTROLS["mode"]
+        record["runner_policy"] = runner_policy
     return _sha(json.dumps(record, sort_keys=True))
 
 
@@ -292,7 +430,12 @@ def publish_journal(
             raise ValueError("Journal revision changed during publication")
         prompt = _prompt(packet_dir, input_view)
         reusable = (
-            options.get("runner") == "pi-json-cli-v1"
+            (
+                options.get("runner") == "pi-json-cli-v1"
+                and options.get("runner_policy") is None
+                or options.get("runner") == SDK_CONTROLS["mode"]
+                and isinstance(options.get("runner_policy"), dict)
+            )
             and options.get("prompt_sha256") == _sha(prompt)
             and options.get("system_sha256") == _sha(SYSTEM_PROMPT)
         )
@@ -300,7 +443,13 @@ def publish_journal(
             "date": day,
             "path": str(target),
             "fingerprint": (
-                _fingerprint(packet_dir, record["model"], prompt, options.get("model_input"))
+                _fingerprint(
+                    packet_dir,
+                    record["model"],
+                    prompt,
+                    options.get("model_input"),
+                    options.get("runner_policy"),
+                )
                 if reusable
                 else None
             ),
@@ -325,15 +474,22 @@ def build_journals(
     include_roots: list[RecallPaths] | None = None,
     input_view: Path | None = None,
     max_input_bytes: int | None = None,
+    node_executable: Path | None = None,
+    pi_sdk: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Resume completed days; regenerate explicitly or when evidence/options change."""
     days = date_range(first, last)
-    if input_view is None and max_input_bytes is not None:
-        raise ValueError("An input byte budget requires --input-view")
+    policy = (
+        _sdk_policy(node_executable, pi_sdk)
+        if node_executable is not None or pi_sdk is not None
+        else None
+    )
+    if input_view is None and policy is None and max_input_bytes is not None:
+        raise ValueError("An input byte budget requires --input-view or SDK mode")
     if input_view is not None and len(days) != 1:
         raise ValueError("One selected input view requires exactly one day")
     budget = 128 * 1024 if max_input_bytes is None else max_input_bytes
-    if input_view is not None and (type(budget) is not int or budget < 1):
+    if (input_view is not None or policy is not None) and (type(budget) is not int or budget < 1):
         raise ValueError("Input byte budget must be a positive integer")
     if input_view is not None:
         input_view = input_view.expanduser().absolute()
@@ -375,14 +531,15 @@ def build_journals(
                 if inspection["input_status"] != "unchanged" or inspection["unresolved_citations"]:
                     raise ValueError("Selected input evidence is not verified current")
             prompt = _prompt(packet_dir, view_content)
-            if selected_metadata is not None:
+            if selected_metadata is not None or policy is not None:
                 request_bytes = len(prompt.encode()) + len(SYSTEM_PROMPT.encode())
                 if request_bytes > budget:
                     raise ValueError(
                         f"Assembled input uses {request_bytes} bytes; budget is {budget}"
                     )
-                selected_metadata.update(request_bytes=request_bytes, max_request_bytes=budget)
-            fingerprint = _fingerprint(packet_dir, model, prompt, selected_metadata)
+                if selected_metadata is not None:
+                    selected_metadata.update(request_bytes=request_bytes, max_request_bytes=budget)
+            fingerprint = _fingerprint(packet_dir, model, prompt, selected_metadata, policy)
             previous = jobs.get(key)
             cached = bool(previous and previous["fingerprint"] == fingerprint and not regenerate)
             if cached and previous is not None:
@@ -394,12 +551,22 @@ def build_journals(
                     raise ValueError("Cached journal revision does not match requested inputs")
                 options = record["generation_options"]
                 if (
-                    _fingerprint(packet_dir, model, prompt, options.get("model_input"))
+                    _fingerprint(
+                        packet_dir,
+                        model,
+                        prompt,
+                        options.get("model_input"),
+                        options.get("runner_policy"),
+                    )
                     != fingerprint
                 ):
                     raise ValueError("Cached revision does not match the selected input")
             else:
-                body, options = run_pi(prompt, model)
+                body, options = (
+                    run_pi_sdk(prompt, model, policy, budget)
+                    if policy is not None
+                    else run_pi(prompt, model)
+                )
                 options.update(prompt_sha256=_sha(prompt), system_sha256=_sha(SYSTEM_PROMPT))
                 if selected_metadata is not None:
                     options["model_input"] = selected_metadata

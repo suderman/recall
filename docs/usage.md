@@ -722,10 +722,60 @@ rejects citations to omitted events, even when those events exist in the full
 packet. Reviewing a body through `journal publish --draft` preserves that rule
 and the original view. Rejected drafts retain their view alongside failure metadata.
 
-Without `--input-view`, the legacy full-packet route remains unchanged and uncapped
-by this option. `--max-input-bytes` without a view is rejected rather than implying
-protection. `journal run` does not select or use these views. Integration tests use
-synthetic packets and fake runners; a real model request still needs approval.
+Without `--input-view` or SDK mode below, the legacy full-packet route remains
+unchanged and uncapped by this option. `--max-input-bytes` without either mode is
+rejected rather than implying protection. `journal run` does not select these
+views or use SDK mode. Tests use synthetic packets and fake runners; a real
+model request still needs approval.
+
+#### Explicit single-request SDK mode
+
+The default CLI route invokes `pi` through PATH and inherits its settings,
+including retries, compaction and eligible cache warming. An input byte limit
+does not control those extra model requests or the total bill.
+
+Opt in to the packaged SDK bridge by providing both trusted local paths:
+
+```bash
+recall journal build --root /path/to/replay \
+  --from 2026-03-31 --to 2026-03-31 --author "Your name" \
+  --timezone America/Edmonton --output /path/to/private/previews \
+  --input-view /path/to/private/view.json --max-input-bytes 131072 \
+  --node-executable /absolute/path/to/node \
+  --pi-sdk /absolute/path/to/pi-coding-agent/dist/index.js
+```
+
+Node and the Pi SDK are external runtime prerequisites for this optional mode.
+Recall does not install them, inspect launcher scripts or guess SDK locations.
+Missing/unsupported configuration fails; it never falls back to the inherited CLI
+route. Paths identify executable code and must come from the operator, not source
+evidence. SDK mode does not invoke the user's `pi` shell launcher or its dotenv/
+service hooks. Required provider environment variables must already be available.
+
+The bridge applies in-memory settings with zero agent/provider retries, no
+compaction or cache warming, no tools/resources and no persisted session. It
+requires a configured physical chat model, not virtual model routing. Original
+core SDK auth/model storage is used under `PI_CODING_AGENT_DIR` or its standard
+default. No credential files are copied or restored. Normal SDK OAuth refresh
+uses its original store; normal runtime model-catalog caching remains SDK-owned.
+User settings and model configuration are not rewritten.
+
+A stream guard rejects a second call before provider entry. It rejects changed
+user messages or tool context and supplies only the approved user/system text,
+not SDK-added working-directory/date system context. Unexpected auxiliary events,
+ambiguous completion, malformed protocol and failed responses prevent publication.
+Each uncached generated day gets one guarded stream; an explicitly requested
+multi-day build may generate one per day. This does not bound authentication
+requests, provider framing or opaque retries inside a remote proxy.
+
+SDK mode defaults to a 131,072-byte user-plus-system prompt budget even without
+`--input-view`. The limit is checked before process startup and cache use.
+Node path, SDK entry digest, bridge digest and fixed policy bind cache/provenance,
+separately from inherited CLI records. Changing only a passing byte limit can
+reuse content; changing runner identity/policy cannot. Old immutable revisions
+remain readable without upgrading their policy. SDK mode clears inherited Node
+preloads and parent Pi session markers. No live request is authorized by installing
+or configuring the bridge.
 
 For an externally drafted body, save a cited revision without a model call:
 
