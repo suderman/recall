@@ -1,6 +1,8 @@
 import fcntl
 import json
+import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -47,6 +49,25 @@ def workspace(root: Path) -> RecallPaths:
         ],
     )
     return paths
+
+
+def runner_config(root: Path) -> dict[str, Any]:
+    config = root / "runner-config"
+    config.mkdir(exist_ok=True)
+    node, sdk = config / "node", config / "sdk.mjs"
+    if not node.exists():
+        node.write_text(f"#!{sys.executable}\nraise SystemExit('Test runner must be mocked')\n")
+        node.chmod(0o700)
+        sdk.write_text("export {};\n")
+    return {"node_executable": node.resolve(), "pi_sdk": sdk.resolve()}
+
+
+def runner_env(root: Path) -> dict[str, str]:
+    config = runner_config(root)
+    return {
+        "RECALL_NODE_EXECUTABLE": str(config["node_executable"]),
+        "RECALL_PI_SDK": str(config["pi_sdk"]),
+    }
 
 
 def test_packet_stable_complete_and_revisions_separate(tmp_path: Path) -> None:

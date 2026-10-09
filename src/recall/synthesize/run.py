@@ -14,7 +14,7 @@ from recall.normalize.rebuild import SOURCES, date_range, rebuild_range
 from recall.normalize.time import day_bounds
 from recall.storage.jsonl import read_jsonl
 from recall.storage.paths import RecallPaths
-from recall.synthesize.generate import DEFAULT_MODEL, build_journals
+from recall.synthesize.generate import DEFAULT_MODEL, _sdk_policy, build_journals
 from recall.synthesize.journal import _write_once
 
 
@@ -26,6 +26,9 @@ def run_journals(
     last: str,
     sources: list[str],
     author: str,
+    node_executable: Path,
+    pi_sdk: Path,
+    max_input_bytes: int = 128 * 1024,
     timezone_name: str = "America/Edmonton",
     model: str = DEFAULT_MODEL,
     slack_client: SlackCaptureClient | None = None,
@@ -34,6 +37,9 @@ def run_journals(
 ) -> Iterator[dict[str, Any]]:
     """Yield stage results; never capture remotely unless given an explicit Slack client."""
     days = date_range(first, last)
+    _sdk_policy(node_executable, pi_sdk)
+    if type(max_input_bytes) is not int or max_input_bytes < 1:
+        raise ValueError("Input byte budget must be a positive integer")
     day_bounds(first, timezone_name)
     if not sources or len(set(sources)) != len(sources) or set(sources) - set(SOURCES):
         raise ValueError(f"Choose distinct sources from {', '.join(SOURCES)}")
@@ -157,6 +163,9 @@ def run_journals(
                 timezone_name=timezone_name,
                 model=model,
                 include_roots=includes,
+                node_executable=node_executable,
+                pi_sdk=pi_sdk,
+                max_input_bytes=max_input_bytes,
             )
             for row in rows:
                 yield {**row, "stage": "journal"}

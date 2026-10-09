@@ -104,8 +104,11 @@ or journal. See [replay and backfill](docs/usage.md#replay-and-backfill).
 
 ## Make a journal preview
 
-Journal generation requires Pi with a configured provider. It sends an evidence
-packet to the selected model, so approve that transmission before running it:
+Journal generation uses the Pi SDK with a fixed single-request policy. Configure
+`RECALL_NODE_EXECUTABLE` and `RECALL_PI_SDK` with absolute Node executable and SDK
+entry-module paths, or pass `--node-executable` and `--pi-sdk`. Both generation
+commands enforce an input byte budget. No alternate CLI runner exists.
+It sends evidence to the selected provider, so approve transmission before running:
 
 ```bash
 recall journal build --root /path/to/replay \

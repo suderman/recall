@@ -20,6 +20,7 @@ from recall.storage.references import resolve_reference
 from recall.synthesize.generate import (
     DEFAULT_MODEL,
     _read_revision,
+    _sdk_policy,
     build_journals,
     publish_journal,
 )
@@ -90,10 +91,21 @@ def run(
     slack_account: str | None = typer.Option(None, "--slack-account"),
     include_archived: bool | None = typer.Option(None, "--include-archived/--exclude-archived"),
     root: Path | None = typer.Option(None, "--root"),
+    node_executable: Path = typer.Option(
+        ...,
+        "--node-executable",
+        envvar="RECALL_NODE_EXECUTABLE",
+        help="Configured absolute Node executable.",
+    ),
+    pi_sdk: Path = typer.Option(
+        ..., "--pi-sdk", envvar="RECALL_PI_SDK", help="Configured absolute Pi SDK entry module."
+    ),
+    max_input_bytes: int = typer.Option(128 * 1024, "--max-input-bytes", min=1),
 ) -> None:
     """Capture optionally, replay selected sources, and generate previews. Never publish."""
     paths = RecallPaths.from_root(resolve_root(root))
     try:
+        _sdk_policy(node_executable, pi_sdk)
         with ExitStack() as stack:
             client = None
             account = "default"
@@ -121,6 +133,9 @@ def run(
                 slack_client=client,
                 slack_account=account,
                 include_archived=archived,
+                node_executable=node_executable,
+                pi_sdk=pi_sdk,
+                max_input_bytes=max_input_bytes,
             ):
                 count = row.get("event_count", row.get("stored_messages"))
                 suffix = f" ({count} events)" if count is not None else ""
@@ -156,17 +171,20 @@ def build(
     input_view: Path | None = typer.Option(
         None, "--input-view", help="Opt in to one explicit exported view; one day only."
     ),
-    max_input_bytes: int | None = typer.Option(
-        None,
+    max_input_bytes: int = typer.Option(
+        128 * 1024,
         "--max-input-bytes",
         min=1,
-        help="Selected/SDK mode: UTF-8 user plus system prompt budget (default 131072).",
+        help="UTF-8 user plus system prompt budget (default 131072).",
     ),
-    node_executable: Path | None = typer.Option(
-        None, "--node-executable", help="Explicit absolute Node executable for SDK mode."
+    node_executable: Path = typer.Option(
+        ...,
+        "--node-executable",
+        envvar="RECALL_NODE_EXECUTABLE",
+        help="Configured absolute Node executable.",
     ),
-    pi_sdk: Path | None = typer.Option(
-        None, "--pi-sdk", help="Explicit absolute SDK entry module; requires --node-executable."
+    pi_sdk: Path = typer.Option(
+        ..., "--pi-sdk", envvar="RECALL_PI_SDK", help="Configured absolute Pi SDK entry module."
     ),
 ) -> None:
     """Generate cited journals through Pi; resume cached days and protect manual edits."""

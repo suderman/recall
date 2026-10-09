@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from test_journals import DAY, TZ, workspace
+from test_journals import DAY, TZ, runner_env, workspace
 from typer.testing import CliRunner
 
 from recall.cli.main import app
@@ -216,13 +216,13 @@ def test_cli_build_uses_overlay_cache_and_protects_manual_edits(
     other = replay(tmp_path / "other", [row])
     calls = []
 
-    def model(prompt, selected):
+    def model(prompt, selected, policy, budget):
         assert "Extra replay evidence" in prompt
         calls.append(1)
         return "Prepared.[fn:evt_mail]", {}
 
     monkeypatch.setattr(generate, "run_pi", model)
-    cli = CliRunner()
+    cli = CliRunner(env=runner_env(tmp_path))
     common = [
         "--root",
         str(paths.root),

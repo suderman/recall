@@ -126,7 +126,7 @@ def test_sdk_policy_and_exact_provider_context_without_credential_copy(sdk):
     node, module, original, observed = sdk
     before = {p: p.read_bytes() for p in original.iterdir()}
     policy = generate._sdk_policy(node, module)
-    body, metadata = generate.run_pi_sdk(
+    body, metadata = generate.run_pi(
         "Synthetic user prompt", "synthetic/fixture:off", policy, 131072
     )
     assert body == "Updated.[fn:evt_mail]"
@@ -164,7 +164,7 @@ def test_sdk_refuses_unsafe_or_failed_session_without_second_stream(sdk, monkeyp
     before = {p: p.read_bytes() for p in original.iterdir()}
     monkeypatch.setenv("FAKE_SDK_MODE", mode)
     with pytest.raises(ValueError):
-        generate.run_pi_sdk(
+        generate.run_pi(
             "Synthetic", "synthetic/fixture:off", generate._sdk_policy(node, module), 131072
         )
     assert not observed.exists() or len(json.loads(observed.read_bytes())) <= 1
@@ -175,7 +175,7 @@ def test_sdk_auth_refresh_uses_original_store_without_duplicate_files(sdk, monke
     node, module, original, observed = sdk
     unchanged = {p: p.read_bytes() for p in (original / "settings.json", original / "models.json")}
     monkeypatch.setenv("FAKE_SDK_MODE", "oauth")
-    generate.run_pi_sdk(
+    generate.run_pi(
         "Synthetic", "synthetic/fixture:off", generate._sdk_policy(node, module), 131072
     )
     assert json.loads((original / "auth.json").read_bytes()) == {"refreshed": "synthetic"}
@@ -186,9 +186,7 @@ def test_sdk_auth_refresh_uses_original_store_without_duplicate_files(sdk, monke
 def test_sdk_budget_prevents_process_before_model_or_config_read(sdk):
     node, module, _, observed = sdk
     with pytest.raises(ValueError, match="budget"):
-        generate.run_pi_sdk(
-            "Synthetic", "synthetic/fixture:off", generate._sdk_policy(node, module), 1
-        )
+        generate.run_pi("Synthetic", "synthetic/fixture:off", generate._sdk_policy(node, module), 1)
     assert not observed.exists()
 
 
@@ -229,33 +227,49 @@ def test_sdk_cache_policy_and_reviewed_publication(sdk, tmp_path):
     assert len(json.loads(observed.read_bytes())) == 2
 
 
-def test_sdk_and_legacy_fingerprints_are_separate(sdk, tmp_path, monkeypatch):
-    node, module, _, _ = sdk
+def test_generation_cannot_omit_runtime_configuration(tmp_path, monkeypatch):
     paths = workspace(tmp_path / "recall")
-    output = tmp_path / "previews"
-    kwargs: dict[str, Any] = dict(
-        first=DAY,
-        last=DAY,
-        author="Example",
-        timezone_name=TZ,
-        output=output,
-        model="synthetic/fixture:off",
+    monkeypatch.setattr(generate, "run_pi", lambda *args: pytest.fail("No unconfigured runner"))
+    missing: dict[str, Any] = dict(
+        first=DAY, last=DAY, author="Example", output=tmp_path / "previews"
     )
-    generate.build_journals(paths, **kwargs, node_executable=node, pi_sdk=module)
-    calls = []
-    monkeypatch.setattr(
-        generate, "run_pi", lambda *args: (calls.append(args) or "Legacy.[fn:evt_mail]", {})
+    with pytest.raises(TypeError):
+        generate.build_journals(paths, **missing)
+    monkeypatch.delenv("RECALL_NODE_EXECUTABLE", raising=False)
+    monkeypatch.delenv("RECALL_PI_SDK", raising=False)
+    result = CliRunner().invoke(
+        app,
+        [
+            "journal",
+            "build",
+            "--root",
+            str(tmp_path / "absent"),
+            "--from",
+            DAY,
+            "--to",
+            DAY,
+            "--author",
+            "Example",
+        ],
     )
-    assert generate.build_journals(paths, **kwargs)[0]["status"] == "generated" and len(calls) == 1
-    assert (
-        generate.build_journals(paths, **kwargs, node_executable=node, pi_sdk=module)[0]["status"]
-        == "generated"
-    )
+    assert result.exit_code == 2 and not (tmp_path / "absent").exists()
 
 
 @pytest.mark.parametrize(
     "damage",
-    ["event-type", "boolean-count", "two-settled", "order", "missing-policy", "extra-event"],
+    [
+        "event-type",
+        "boolean-count",
+        "two-settled",
+        "order",
+        "missing-policy",
+        "extra-event",
+        "wrong-model",
+        "length",
+        "tool-call",
+        "json",
+        "non-object",
+    ],
 )
 def test_sdk_protocol_failures_are_safe_values(sdk, monkeypatch, damage):
     node, module, _, _ = sdk
@@ -285,13 +299,22 @@ def test_sdk_protocol_failures_are_safe_values(sdk, monkeypatch, damage):
             rows[-1], rows[-2] = rows[-2], rows[-1]
         elif damage == "missing-policy":
             rows.pop(0)
-        else:
+        elif damage == "extra-event":
             rows.insert(2, {"type": "auto_retry_start"})
-        return subprocess.CompletedProcess(args, 0, "\n".join(json.dumps(row) for row in rows), "")
+        elif damage == "wrong-model":
+            message["model"] = "other"
+        elif damage == "length":
+            message["stopReason"] = "length"
+        elif damage == "tool-call":
+            message["content"] = [{"type": "toolCall"}]
+        elif damage == "non-object":
+            return subprocess.CompletedProcess(args, 0, "[]", "")
+        stdout = "not JSON" if damage == "json" else "\n".join(json.dumps(row) for row in rows)
+        return subprocess.CompletedProcess(args, 0, stdout, "")
 
     monkeypatch.setattr(generate.subprocess, "run", response)
-    with pytest.raises(ValueError, match="policy"):
-        generate.run_pi_sdk(
+    with pytest.raises(ValueError):
+        generate.run_pi(
             "Synthetic", "synthetic/fixture:off", generate._sdk_policy(node, module), 131072
         )
 
@@ -341,13 +364,13 @@ export const ModelRuntime={create:async options=>{
     monkeypatch.setenv("FAKE_SDK_MODE", mode)
     policy = generate._sdk_policy(node, module)
     if mode == "success":
-        body, _ = generate.run_pi_sdk(
+        body, _ = generate.run_pi(
             "Synthetic evidence only.", "synthetic/fixture:off", policy, 131072
         )
         assert body == "Synthetic completed response."
     else:
         with pytest.raises(ValueError):
-            generate.run_pi_sdk("Synthetic evidence only.", "synthetic/fixture:off", policy, 131072)
+            generate.run_pi("Synthetic evidence only.", "synthetic/fixture:off", policy, 131072)
     assert len(json.loads(observed.read_bytes())) == 1
     assert {p: p.read_bytes() for p in before} == before
 

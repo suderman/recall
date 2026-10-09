@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
-from test_journals import DAY, TZ, workspace
+from test_journals import DAY, TZ, runner_config, workspace
 from typer.testing import CliRunner
 
 from recall.cli.main import app
@@ -21,7 +21,8 @@ def saved_revision(paths):
         body="I prepared the update.[fn:evt_mail]",
         model=generate.DEFAULT_MODEL,
         generation_options={
-            "runner": "pi-json-cli-v1",
+            "runner": generate.SDK_CONTROLS["mode"],
+            "runner_policy": generate._sdk_policy(**runner_config(paths.root.parent)),
             "prompt_sha256": generate._sha(prompt),
             "system_sha256": generate._sha(generate.SYSTEM_PROMPT),
             "responseId": "actual-original-response",
@@ -59,7 +60,13 @@ def test_reviewed_publication_preserves_original_and_cached_build(tmp_path, monk
     assert generate.publish_journal(paths, revision=revision, output=output, draft=draft) == result
     assert (
         generate.build_journals(
-            paths, first=DAY, last=DAY, author="Example", timezone_name=TZ, output=output
+            paths,
+            first=DAY,
+            last=DAY,
+            author="Example",
+            timezone_name=TZ,
+            output=output,
+            **runner_config(paths.root.parent),
         )[0]["status"]
         == "cached"
     )
@@ -70,7 +77,13 @@ def test_reviewed_publication_preserves_original_and_cached_build(tmp_path, monk
     write_jsonl(paths.normalized_event_path(DAY), rows)
     with pytest.raises(AssertionError, match="must not call"):
         generate.build_journals(
-            paths, first=DAY, last=DAY, author="Example", timezone_name=TZ, output=output
+            paths,
+            first=DAY,
+            last=DAY,
+            author="Example",
+            timezone_name=TZ,
+            output=output,
+            **runner_config(paths.root.parent),
         )
     assert target.read_bytes() == reviewed.read_bytes()
 
@@ -161,7 +174,13 @@ def test_failed_publication_can_resume_replacing_pending_revision(tmp_path, monk
     assert target.read_bytes() == Path(result["revision"]).read_bytes()
     assert (
         generate.build_journals(
-            paths, first=DAY, last=DAY, author="Example", timezone_name=TZ, output=output
+            paths,
+            first=DAY,
+            last=DAY,
+            author="Example",
+            timezone_name=TZ,
+            output=output,
+            **runner_config(paths.root.parent),
         )[0]["status"]
         == "cached"
     )
@@ -218,9 +237,37 @@ def test_external_revision_does_not_inherit_native_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(generate, "run_pi", no_model)
     with pytest.raises(AssertionError, match="must not call"):
         generate.build_journals(
-            paths, first=DAY, last=DAY, author="Example", timezone_name=TZ, output=output
+            paths,
+            first=DAY,
+            last=DAY,
+            author="Example",
+            timezone_name=TZ,
+            output=output,
+            **runner_config(paths.root.parent),
         )
     assert "External draft" in Path(result["path"]).read_text()
+
+
+def test_historical_cli_revision_still_reads_and_publishes_without_runtime_compatibility(
+    tmp_path, monkeypatch
+):
+    paths = workspace(tmp_path / "recall")
+    packet = prepare_journal(paths, day=DAY, author="Example", timezone_name=TZ)
+    revision = save_journal(
+        paths,
+        packet_dir=packet,
+        body="Historical.[fn:evt_mail]",
+        model="historical-route",
+        generation_options={"runner": "pi-json-cli-v1"},
+    )
+    before = {p: p.read_bytes() for p in revision.parent.iterdir()}
+    monkeypatch.setattr(generate, "run_pi", no_model)
+    result = generate.publish_journal(paths, revision=revision, output=tmp_path / "journal")
+    assert Path(result["path"]).read_bytes() == revision.read_bytes()
+    assert {p: p.read_bytes() for p in before} == before
+    assert generate._read_revision(revision)[0]["generation_options"]["runner"] == "pi-json-cli-v1"
+    manifest = read_jsonl(paths.state / "journal-builds.jsonl")
+    assert manifest[0]["fingerprint"] is None
 
 
 def test_foreign_revision_source_output_and_symlink_refusal(tmp_path):

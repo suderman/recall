@@ -46,47 +46,6 @@ def _model_route(model: str) -> tuple[str, str, str]:
     return provider, model_id, thinking
 
 
-def run_pi(prompt: str, model: str) -> tuple[str, dict[str, Any]]:
-    """Legacy CLI route: model-call recovery policy is inherited from user settings."""
-    provider, model_id, thinking = _model_route(model)
-    args = [
-        "pi",
-        "--provider",
-        provider,
-        "--model",
-        model_id,
-        "--thinking",
-        thinking,
-        "--mode",
-        "json",
-        "--no-tools",
-        "--no-extensions",
-        "--no-skills",
-        "--no-context-files",
-        "--no-prompt-templates",
-        "--no-themes",
-        "--no-session",
-        "--no-approve",
-        "--offline",
-        "--system-prompt",
-        SYSTEM_PROMPT,
-    ]
-    # No project resources or parent conversation enter the synthesis request.
-    with TemporaryDirectory(prefix="recall-journal-") as working_directory:
-        result = subprocess.run(
-            args,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            cwd=working_directory,
-            timeout=600,
-            check=False,
-        )
-    if result.returncode:
-        raise ValueError(f"Pi exited with status {result.returncode}; no journal published")
-    return _pi_response(_pi_events(result.stdout), provider, model_id, thinking)
-
-
 def _pi_events(stdout: str) -> list[dict[str, Any]]:
     try:
         events = [json.loads(line) for line in stdout.split("\n") if line.strip()]
@@ -102,8 +61,6 @@ def _pi_response(
     provider: str,
     model_id: str,
     thinking: str,
-    *,
-    runner: str = "pi-json-cli-v1",
 ) -> tuple[str, dict[str, Any]]:
     if not any(row.get("type") == "agent_settled" for row in events):
         raise ValueError("Pi stream did not finish; no journal published")
@@ -114,9 +71,9 @@ def _pi_response(
         for row in events
         if row.get("type") == "message_end" and row["message"].get("role") == "assistant"
     ]
-    if not messages:
-        raise ValueError("Pi returned no completed assistant response")
-    message = messages[-1]
+    if len(messages) != 1:
+        raise ValueError("Pi must return exactly one completed assistant response")
+    message = messages[0]
     if message.get("stopReason") != "stop":
         raise ValueError(f"Model did not finish normally: {message.get('stopReason')}")
     if message.get("provider") != provider or message.get("model") != model_id:
@@ -136,7 +93,7 @@ def _pi_response(
             "timestamp",
         )
     }
-    metadata.update(runner=runner, thinking=thinking, tools_enabled=False)
+    metadata.update(runner=SDK_CONTROLS["mode"], thinking=thinking, tools_enabled=False)
     return body, metadata
 
 
@@ -155,7 +112,7 @@ SDK_CONTROLS = {
 
 def _sdk_policy(node_executable: Path | None, pi_sdk: Path | None) -> dict[str, Any]:
     if node_executable is None or pi_sdk is None:
-        raise ValueError("SDK mode requires both --node-executable and --pi-sdk")
+        raise ValueError("Configure both --node-executable and --pi-sdk for generation")
     node, sdk = node_executable.expanduser(), pi_sdk.expanduser()
     if not node.is_absolute() or not sdk.is_absolute():
         raise ValueError("Choose absolute Node executable and SDK module paths")
@@ -175,7 +132,7 @@ def _sdk_policy(node_executable: Path | None, pi_sdk: Path | None) -> dict[str, 
         raise ValueError("SDK runner identity could not be read") from None
 
 
-def run_pi_sdk(
+def run_pi(
     prompt: str,
     model: str,
     policy: dict[str, Any],
@@ -237,9 +194,7 @@ def run_pi_sdk(
     ):
         raise ValueError("Pi SDK single-request policy was not satisfied")
     try:
-        body, metadata = _pi_response(
-            events, provider, model_id, thinking, runner=SDK_CONTROLS["mode"]
-        )
+        body, metadata = _pi_response(events, provider, model_id, thinking)
     except (KeyError, TypeError, AttributeError):
         raise ValueError("Pi SDK returned an invalid assistant response") from None
     metadata.update(
@@ -291,23 +246,21 @@ def _fingerprint(
     packet_dir: Path,
     model: str,
     prompt: str,
+    runner_policy: dict[str, Any],
     model_input_metadata: dict[str, Any] | None = None,
-    runner_policy: dict[str, Any] | None = None,
 ) -> str:
     record: dict[str, Any] = {
         "packet": packet_dir.name,
         "model": model,
         "prompt_sha256": _sha(prompt),
         "system_sha256": _sha(SYSTEM_PROMPT),
-        "runner": "pi-json-cli-v1",
+        "runner": SDK_CONTROLS["mode"],
+        "runner_policy": runner_policy,
     }
     if model_input_metadata is not None:
         record["model_input"] = {
             key: model_input_metadata[key] for key in ("format", "sha256", "event_ids")
         }
-    if runner_policy is not None:
-        record["runner"] = SDK_CONTROLS["mode"]
-        record["runner_policy"] = runner_policy
     return _sha(json.dumps(record, sort_keys=True))
 
 
@@ -430,12 +383,8 @@ def publish_journal(
             raise ValueError("Journal revision changed during publication")
         prompt = _prompt(packet_dir, input_view)
         reusable = (
-            (
-                options.get("runner") == "pi-json-cli-v1"
-                and options.get("runner_policy") is None
-                or options.get("runner") == SDK_CONTROLS["mode"]
-                and isinstance(options.get("runner_policy"), dict)
-            )
+            options.get("runner") == SDK_CONTROLS["mode"]
+            and isinstance(options.get("runner_policy"), dict)
             and options.get("prompt_sha256") == _sha(prompt)
             and options.get("system_sha256") == _sha(SYSTEM_PROMPT)
         )
@@ -447,8 +396,8 @@ def publish_journal(
                     packet_dir,
                     record["model"],
                     prompt,
+                    options["runner_policy"],
                     options.get("model_input"),
-                    options.get("runner_policy"),
                 )
                 if reusable
                 else None
@@ -473,23 +422,17 @@ def build_journals(
     regenerate: bool = False,
     include_roots: list[RecallPaths] | None = None,
     input_view: Path | None = None,
-    max_input_bytes: int | None = None,
-    node_executable: Path | None = None,
-    pi_sdk: Path | None = None,
+    max_input_bytes: int = 128 * 1024,
+    node_executable: Path,
+    pi_sdk: Path,
 ) -> list[dict[str, Any]]:
     """Resume completed days; regenerate explicitly or when evidence/options change."""
     days = date_range(first, last)
-    policy = (
-        _sdk_policy(node_executable, pi_sdk)
-        if node_executable is not None or pi_sdk is not None
-        else None
-    )
-    if input_view is None and policy is None and max_input_bytes is not None:
-        raise ValueError("An input byte budget requires --input-view or SDK mode")
+    policy = _sdk_policy(node_executable, pi_sdk)
     if input_view is not None and len(days) != 1:
         raise ValueError("One selected input view requires exactly one day")
-    budget = 128 * 1024 if max_input_bytes is None else max_input_bytes
-    if (input_view is not None or policy is not None) and (type(budget) is not int or budget < 1):
+    budget = max_input_bytes
+    if type(budget) is not int or budget < 1:
         raise ValueError("Input byte budget must be a positive integer")
     if input_view is not None:
         input_view = input_view.expanduser().absolute()
@@ -531,15 +474,12 @@ def build_journals(
                 if inspection["input_status"] != "unchanged" or inspection["unresolved_citations"]:
                     raise ValueError("Selected input evidence is not verified current")
             prompt = _prompt(packet_dir, view_content)
-            if selected_metadata is not None or policy is not None:
-                request_bytes = len(prompt.encode()) + len(SYSTEM_PROMPT.encode())
-                if request_bytes > budget:
-                    raise ValueError(
-                        f"Assembled input uses {request_bytes} bytes; budget is {budget}"
-                    )
-                if selected_metadata is not None:
-                    selected_metadata.update(request_bytes=request_bytes, max_request_bytes=budget)
-            fingerprint = _fingerprint(packet_dir, model, prompt, selected_metadata, policy)
+            request_bytes = len(prompt.encode()) + len(SYSTEM_PROMPT.encode())
+            if request_bytes > budget:
+                raise ValueError(f"Assembled input uses {request_bytes} bytes; budget is {budget}")
+            if selected_metadata is not None:
+                selected_metadata.update(request_bytes=request_bytes, max_request_bytes=budget)
+            fingerprint = _fingerprint(packet_dir, model, prompt, policy, selected_metadata)
             previous = jobs.get(key)
             cached = bool(previous and previous["fingerprint"] == fingerprint and not regenerate)
             if cached and previous is not None:
@@ -555,19 +495,20 @@ def build_journals(
                         packet_dir,
                         model,
                         prompt,
-                        options.get("model_input"),
                         options.get("runner_policy"),
+                        options.get("model_input"),
                     )
                     != fingerprint
                 ):
                     raise ValueError("Cached revision does not match the selected input")
             else:
-                body, options = (
-                    run_pi_sdk(prompt, model, policy, budget)
-                    if policy is not None
-                    else run_pi(prompt, model)
+                body, options = run_pi(prompt, model, policy, budget)
+                options.update(
+                    runner=SDK_CONTROLS["mode"],
+                    runner_policy=policy,
+                    prompt_sha256=_sha(prompt),
+                    system_sha256=_sha(SYSTEM_PROMPT),
                 )
-                options.update(prompt_sha256=_sha(prompt), system_sha256=_sha(SYSTEM_PROMPT))
                 if selected_metadata is not None:
                     options["model_input"] = selected_metadata
             # Re-render cached bodies too; citation/layout fixes need no new model call.

@@ -590,11 +590,24 @@ join records, infer native/export equivalence or migrate old IDs.
 
 ## Journals
 
-`journal build` reads normalized evidence and calls Pi. The default route is
-`codex-lb/gpt-6.1-sol:medium`; override it with `--model`. Tools, extensions,
-skills, project context and session persistence are disabled for this request.
+`journal build` and `journal run` use one SDK runner with mandatory single-request
+policy. Configure its trusted local paths once in the environment, or provide
+`--node-executable` and `--pi-sdk` on either command:
+
+```bash
+export RECALL_NODE_EXECUTABLE=/absolute/path/to/node
+export RECALL_PI_SDK=/absolute/path/to/pi-coding-agent/dist/index.js
+```
+
+Node and the Pi SDK are runtime prerequisites. Recall does not install them or
+guess launcher layouts. Missing or invalid configuration fails before generation,
+workspace initialization or optional capture. There is no CLI-runner mode.
+
+The default model route is `codex-lb/gpt-6.1-sol:medium`; override it with `--model`.
+Tools, extensions, skills, project context and session persistence are disabled.
 Only journal instructions and evidence enter the model request. Approve remote
-transmission first.
+transmission first. Every generation checks its user-plus-system prompt byte
+budget, default 131,072, before runner startup.
 
 ```bash
 recall journal build --root /path/to/replay \
@@ -711,7 +724,7 @@ assembled generation budget. Failure leaves the previous published journal intac
 
 Each selected revision keeps its exact private `model-input.json`. Generation
 metadata binds the view hash, selected IDs and original request budget. Cache
-identity binds the view and selection, separately from the legacy route. The
+identity binds the view, selection and fixed runner policy. The
 current byte limit is checked before cache use. Changing only a passing limit
 can reuse existing content without another model call; the revision keeps the
 original call's budget. Identical view bytes at a different path can also reuse
@@ -722,35 +735,18 @@ rejects citations to omitted events, even when those events exist in the full
 packet. Reviewing a body through `journal publish --draft` preserves that rule
 and the original view. Rejected drafts retain their view alongside failure metadata.
 
-Without `--input-view` or SDK mode below, the legacy full-packet route remains
-unchanged and uncapped by this option. `--max-input-bytes` without either mode is
-rejected rather than implying protection. `journal run` does not select these
-views or use SDK mode. Tests use synthetic packets and fake runners; a real
-model request still needs approval.
+Without `--input-view`, `journal build` supplies the full frozen packet under the
+same byte budget and runner policy. Oversized days fail rather than taking an
+uncapped path. `journal run` also uses this runner and budget; it does not choose
+selected views or automatically split a day. Tests use synthetic packets and
+fake providers; a real model request still needs approval.
 
-#### Explicit single-request SDK mode
+#### Fixed runner policy
 
-The default CLI route invokes `pi` through PATH and inherits its settings,
-including retries, compaction and eligible cache warming. An input byte limit
-does not control those extra model requests or the total bill.
-
-Opt in to the packaged SDK bridge by providing both trusted local paths:
-
-```bash
-recall journal build --root /path/to/replay \
-  --from 2026-03-31 --to 2026-03-31 --author "Your name" \
-  --timezone America/Edmonton --output /path/to/private/previews \
-  --input-view /path/to/private/view.json --max-input-bytes 131072 \
-  --node-executable /absolute/path/to/node \
-  --pi-sdk /absolute/path/to/pi-coding-agent/dist/index.js
-```
-
-Node and the Pi SDK are external runtime prerequisites for this optional mode.
-Recall does not install them, inspect launcher scripts or guess SDK locations.
-Missing/unsupported configuration fails; it never falls back to the inherited CLI
-route. Paths identify executable code and must come from the operator, not source
-evidence. SDK mode does not invoke the user's `pi` shell launcher or its dotenv/
-service hooks. Required provider environment variables must already be available.
+Configured Node and SDK paths identify executable code. They must come from the
+operator, not source evidence. The runner does not invoke the user's `pi` shell
+launcher or its dotenv/service hooks. Required provider environment variables
+must already be available.
 
 The bridge applies in-memory settings with zero agent/provider retries, no
 compaction or cache warming, no tools/resources and no persisted session. It
@@ -768,14 +764,13 @@ Each uncached generated day gets one guarded stream; an explicitly requested
 multi-day build may generate one per day. This does not bound authentication
 requests, provider framing or opaque retries inside a remote proxy.
 
-SDK mode defaults to a 131,072-byte user-plus-system prompt budget even without
-`--input-view`. The limit is checked before process startup and cache use.
-Node path, SDK entry digest, bridge digest and fixed policy bind cache/provenance,
-separately from inherited CLI records. Changing only a passing byte limit can
-reuse content; changing runner identity/policy cannot. Old immutable revisions
-remain readable without upgrading their policy. SDK mode clears inherited Node
-preloads and parent Pi session markers. No live request is authorized by installing
-or configuring the bridge.
+The byte limit is checked before process startup and cache use for every request.
+Node path, SDK entry digest, bridge digest and fixed policy bind cache/provenance.
+Changing only a passing limit can reuse content; changing runner identity/policy
+cannot. Historical immutable revisions remain readable for inspection, review and
+publication, without upgrading their metadata or preserving old execution/cache
+routes. Inherited Node preloads and parent Pi session markers are cleared.
+Installing or configuring the runner does not authorize a live request.
 
 For an externally drafted body, save a cited revision without a model call:
 

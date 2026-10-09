@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from test_journals import DAY, TZ, workspace
+from test_journals import DAY, TZ, runner_config, runner_env, workspace
 from typer.testing import CliRunner
 
 from recall.cli.main import app
@@ -34,6 +34,7 @@ def build(paths, view, output, **kwargs):
         timezone_name=TZ,
         output=output,
         input_view=view,
+        **runner_config(paths.root.parent),
         **kwargs,
     )[0]
 
@@ -41,9 +42,9 @@ def build(paths, view, output, **kwargs):
 def fake_runner(monkeypatch, body="I prepared the update.[fn:evt_mail]"):
     calls = []
 
-    def run(prompt, model):
+    def run(prompt, model, policy, budget):
         calls.append((prompt, model))
-        return body, {"runner": "pi-json-cli-v1", "tools_enabled": False, "responseId": "fixture"}
+        return body, {"tools_enabled": False, "responseId": "fixture"}
 
     monkeypatch.setattr(generate, "run_pi", run)
     return calls
@@ -142,7 +143,7 @@ def test_stale_view_cannot_follow_changed_source_or_author(tmp_path, monkeypatch
     assert not calls
 
 
-def test_selection_and_legacy_cache_entries_are_isolated(tmp_path, monkeypatch):
+def test_selected_and_full_packet_cache_entries_are_isolated(tmp_path, monkeypatch):
     paths, packet, view, output = fixture(tmp_path)
     calls = fake_runner(monkeypatch)
     first = build(paths, view, output)
@@ -152,13 +153,19 @@ def test_selection_and_legacy_cache_entries_are_isolated(tmp_path, monkeypatch):
     assert build(paths, second, output)["status"] == "generated" and len(calls2) == 1
     assert build(paths, second, output)["status"] == "cached"
     fake_runner(monkeypatch)
-    legacy = generate.build_journals(
-        paths, first=DAY, last=DAY, author="Example", timezone_name=TZ, output=output
+    full = generate.build_journals(
+        paths,
+        first=DAY,
+        last=DAY,
+        author="Example",
+        timezone_name=TZ,
+        output=output,
+        **runner_config(paths.root.parent),
     )[0]
-    assert legacy["status"] == "generated"
+    assert full["status"] == "generated"
     assert (
         "model_input"
-        not in generate._read_revision(Path(legacy["revision"]))[0]["generation_options"]
+        not in generate._read_revision(Path(full["revision"]))[0]["generation_options"]
     )
     assert build(paths, view, output)["status"] == "generated"
     assert Path(first["revision"]).is_file() and len(calls) == 1
@@ -228,7 +235,7 @@ def test_view_change_during_runner_cannot_publish(tmp_path, monkeypatch):
 
     def run(*args):
         view.write_text(view.read_text() + " ")
-        return "Prepared.[fn:evt_mail]", {"runner": "pi-json-cli-v1"}
+        return "Prepared.[fn:evt_mail]", {}
 
     monkeypatch.setattr(generate, "run_pi", run)
     with pytest.raises(ValueError, match="changed"):
@@ -236,16 +243,23 @@ def test_view_change_during_runner_cannot_publish(tmp_path, monkeypatch):
     assert not output.exists()
 
 
-def test_selected_mode_requires_one_day_and_budget_requires_view(tmp_path, monkeypatch):
+def test_selected_view_requires_one_day_and_all_generation_requires_positive_budget(
+    tmp_path, monkeypatch
+):
     paths, _, view, output = fixture(tmp_path)
     calls = fake_runner(monkeypatch)
     for kwargs in (
         {"first": DAY, "last": "2026-03-31", "input_view": view},
-        {"first": DAY, "last": DAY, "max_input_bytes": 131072},
+        {"first": DAY, "last": DAY, "max_input_bytes": 0},
     ):
         with pytest.raises(ValueError):
             generate.build_journals(
-                paths, author="Example", timezone_name=TZ, output=output, **kwargs
+                paths,
+                author="Example",
+                timezone_name=TZ,
+                output=output,
+                **kwargs,
+                **runner_config(paths.root.parent),
             )
     assert not calls
 
@@ -270,7 +284,7 @@ def test_frozen_revision_survives_template_change_and_export_removal(tmp_path, m
     assert len(calls) == 1
 
 
-def test_large_selected_input_rejected_but_legacy_route_stays_uncapped(tmp_path, monkeypatch):
+def test_large_input_rejected_for_selected_and_full_packet_generation(tmp_path, monkeypatch):
     paths, _, view, output = fixture(tmp_path)
     calls = fake_runner(monkeypatch)
     first = build(paths, view, output)
@@ -284,11 +298,17 @@ def test_large_selected_input_rejected_but_legacy_route_stays_uncapped(tmp_path,
     with pytest.raises(ValueError, match="budget"):
         build(paths, view, output)
     assert len(calls) == 1 and Path(first["path"]).read_bytes() == before
-    result = generate.build_journals(
-        paths, first=DAY, last=DAY, author="Example", timezone_name=TZ, output=output
-    )[0]
-    assert result["status"] == "generated" and len(calls) == 2
-    assert len(calls[-1][0].encode()) > 131072
+    with pytest.raises(ValueError, match="budget"):
+        generate.build_journals(
+            paths,
+            first=DAY,
+            last=DAY,
+            author="Example",
+            timezone_name=TZ,
+            output=output,
+            **runner_config(paths.root.parent),
+        )
+    assert len(calls) == 1 and Path(first["path"]).read_bytes() == before
 
 
 def test_selected_evidence_requires_current_raw_citations(tmp_path, monkeypatch):
@@ -321,6 +341,7 @@ def test_wrong_author_does_not_reuse_selected_view(tmp_path, monkeypatch):
             timezone_name=TZ,
             output=output,
             input_view=view,
+            **runner_config(paths.root.parent),
         )
     assert not calls
 
@@ -339,7 +360,7 @@ def test_request_budget_measures_utf8_not_characters(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
-def test_null_optional_view_metadata_remains_legacy(tmp_path, monkeypatch):
+def test_null_optional_view_metadata_is_not_selected_evidence(tmp_path, monkeypatch):
     paths, packet, _, output = fixture(tmp_path)
     revision = journal.save_journal(
         paths,
@@ -379,6 +400,7 @@ def test_cli_view_generation_uses_fake_runner_only(tmp_path, monkeypatch):
             "--max-input-bytes",
             "131072",
         ],
+        env=runner_env(paths.root.parent),
     )
     assert result.exit_code == 0, result.output
     assert "generated" in result.stdout and len(calls) == 1
