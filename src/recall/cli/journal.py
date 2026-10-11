@@ -59,6 +59,8 @@ def input_view(
             metadata, _ = _load_packet(packet)
             roots = [Path(metadata["normalized_path"]).parents[3]]
             roots += [Path(row["root"]) for row in metadata.get("normalized_inputs", [])]
+            if "people_root" in metadata:
+                roots.append(Path(metadata["people_root"]))
             if any(
                 target.is_relative_to(resolve_reference(root).resolve() / "data") for root in roots
             ):
@@ -101,6 +103,9 @@ def run(
         ..., "--pi-sdk", envvar="RECALL_PI_SDK", help="Configured absolute Pi SDK entry module."
     ),
     max_input_bytes: int = typer.Option(128 * 1024, "--max-input-bytes", min=1),
+    people_root: Path | None = typer.Option(
+        None, "--people-root", help="Read Recall identities and author naming preferences."
+    ),
 ) -> None:
     """Capture optionally, replay selected sources, and generate previews. Never publish."""
     paths = RecallPaths.from_root(resolve_root(root))
@@ -136,6 +141,7 @@ def run(
                 node_executable=node_executable,
                 pi_sdk=pi_sdk,
                 max_input_bytes=max_input_bytes,
+                people_root=RecallPaths.from_root(people_root) if people_root is not None else None,
             ):
                 count = row.get("event_count", row.get("stored_messages"))
                 suffix = f" ({count} events)" if count is not None else ""
@@ -168,6 +174,9 @@ def build(
     regenerate: bool = typer.Option(False, "--regenerate"),
     root: Path | None = typer.Option(None, "--root"),
     include_root: list[Path] | None = typer.Option(None, "--include-root"),
+    people_root: Path | None = typer.Option(
+        None, "--people-root", help="Read Recall identities and author naming preferences."
+    ),
     input_view: Path | None = typer.Option(
         None, "--input-view", help="Opt in to one explicit exported view; one day only."
     ),
@@ -199,6 +208,7 @@ def build(
             model=model,
             regenerate=regenerate,
             include_roots=[RecallPaths.from_root(path) for path in include_root or []],
+            people_root=RecallPaths.from_root(people_root) if people_root is not None else None,
             input_view=input_view,
             max_input_bytes=max_input_bytes,
             node_executable=node_executable,
@@ -267,6 +277,9 @@ def prepare(
     timezone_name: str = typer.Option("UTC", "--timezone"),
     root: Path | None = typer.Option(None, "--root"),
     include_root: list[Path] | None = typer.Option(None, "--include-root"),
+    people_root: Path | None = typer.Option(
+        None, "--people-root", help="Read Recall identities and author naming preferences."
+    ),
 ) -> None:
     """Snapshot evidence and instructions locally. Does not call an LLM."""
     try:
@@ -276,6 +289,7 @@ def prepare(
             author=author,
             timezone_name=timezone_name,
             include_roots=[RecallPaths.from_root(path) for path in include_root or []],
+            people_root=RecallPaths.from_root(people_root) if people_root is not None else None,
         )
     except (ValueError, OSError, ZoneInfoNotFoundError) as exc:
         typer.echo(str(exc), err=True)

@@ -605,9 +605,9 @@ workspace initialization or optional capture. There is no CLI-runner mode.
 
 The default model route is `codex-lb/gpt-6.1-sol:medium`; override it with `--model`.
 Tools, extensions, skills, project context and session persistence are disabled.
-Only journal instructions and evidence enter the model request. Approve remote
-transmission first. Every generation checks its user-plus-system prompt byte
-budget, default 131,072, before runner startup.
+Only journal instructions, evidence and explicitly selected people context enter
+the model request. Approve remote transmission first. Every generation checks its
+user-plus-system prompt byte budget, default 131,072, before runner startup.
 
 ```bash
 recall journal build --root /path/to/replay \
@@ -656,6 +656,56 @@ coverage hashes cannot certify currentness. New single-root packets record those
 hashes, including a null hash for absent coverage; later creation counts as drift.
 Inspection neither rewrites old packets nor establishes capture completeness.
 
+#### Include resolved people and personal names
+
+`--people-root /path/to/archive` opts into existing Recall identity state on
+`journal prepare`, `build` and `run`. The selected root needs an existing
+`data/state/recall.sqlite3`. Recall opens it read-only and resolves sender and
+participant identities at each event's timestamp. It does not match names,
+create people, merge identities or trust old normalized person IDs over current
+resolutions. Unresolved identities stay unresolved; original event fields and
+source labels remain unchanged.
+
+Optional author-specific relationships and names belong in that root's private
+`config/journal/people.toml`. For example, using fictional values:
+
+```toml
+[[person]]
+author = "Example"
+person_id = "person_casey"
+relationship = "my spouse"
+preferred_names = ["Caz"]
+evidence = ["Author confirmed this relationship and personal name on 2026-03-31."]
+valid_from = "2026-03-31"
+valid_to = "2026-03-31"
+```
+
+Use an existing resolved person ID and your own reviewed evidence. Configuration
+does not establish identity ownership. One entry per author/person is supported.
+`evidence` and a relationship or nonempty name list are required. Bounds are
+optional quoted dates or timezone-bearing timestamps, with the same inclusive
+UTC bounds as identity resolution. Omit bounds only when that scope is supported.
+Names guide the author's narrative; quoted evidence keeps its original wording.
+This is explicit naming guidance, not a learned voice profile.
+
+```bash
+packet="$(recall journal prepare --root /path/to/replay --date 2026-03-31 \
+  --author "Example" --timezone America/Edmonton --people-root /path/to/archive)"
+recall journal inspect --packet "$packet" --require-current
+```
+
+The packet freezes a hash-checked `people.json` with event-to-person bindings,
+display names and applicable author preferences. It excludes person notes,
+tags and people absent from the evidence. A selected input view further limits
+context to its selected events. Included names, relationships and their evidence
+become model input, so review them under the same transmission gate as source text.
+
+Strict inspection reports people context as unchanged, changed or unverifiable.
+Relevant resolution, display-name or preference changes invalidate currentness
+and generation caches. Unrelated database changes do not. Frozen historical
+packets and revisions remain readable; inspection never upgrades their context.
+Without `--people-root`, no database or naming configuration is read.
+
 #### Preview a bounded model input
 
 `journal input-view` previews a separate versioned JSON view. By default it prints
@@ -688,8 +738,8 @@ marketing classifier silently removes events, and omitted content must not be
 inferred. Review selection for factual gaps before any later generation.
 
 Exports require an owner-only directory and create mode `0600` files. Public or
-symlink files are rejected. Export inside packet/evidence data directories is
-refused. A writer lock and atomic replacement protect the output. Exact retries
+symlink files are rejected. Export inside packet, evidence or people-source data
+directories is refused. A writer lock and atomic replacement protect the output. Exact retries
 leave bytes and mtime unchanged; edited files are never overwritten.
 
 Preview/export does not call a model or change accepted packets or revisions.
@@ -701,7 +751,7 @@ model route and transmission before running it.
 `journal build --input-view` opts in to one explicit exported view for one day.
 It does not choose events, trim quoted history or split a day into model calls.
 After approving transmission, use the same root, ordered include-roots, date,
-author and timezone that produced the view's packet:
+author, timezone and optional people root that produced the view's packet:
 
 ```bash
 recall journal build --root /path/to/replay \
@@ -714,7 +764,8 @@ The view must be an owner-only regular file in canonical exported form. Its
 packet, selected events, complete text, attribution, coverage, citation markers
 and current instructions must match. Changed, stale, public or symlink views
 fail before runner startup. This mode also requires unchanged normalized/coverage
-inputs and resolved citations. Use the documented relocation map when needed.
+inputs, any supplied people context and resolved citations. Use the documented
+relocation map when needed.
 
 The default generation budget is 131,072 bytes for the sum of the UTF-8 user and
 system prompts, including the selected-input wrapper. `--max-input-bytes` changes

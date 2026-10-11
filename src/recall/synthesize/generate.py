@@ -421,6 +421,7 @@ def build_journals(
     model: str = DEFAULT_MODEL,
     regenerate: bool = False,
     include_roots: list[RecallPaths] | None = None,
+    people_root: RecallPaths | None = None,
     input_view: Path | None = None,
     max_input_bytes: int = 128 * 1024,
     node_executable: Path,
@@ -458,6 +459,7 @@ def build_journals(
                 author=author,
                 timezone_name=timezone_name,
                 include_roots=include_roots,
+                people_root=people_root,
             )
             _load_packet(packet_dir)
             view_content = None

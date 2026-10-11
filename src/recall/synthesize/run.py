@@ -16,6 +16,7 @@ from recall.storage.jsonl import read_jsonl
 from recall.storage.paths import RecallPaths
 from recall.synthesize.generate import DEFAULT_MODEL, _sdk_policy, build_journals
 from recall.synthesize.journal import _write_once
+from recall.synthesize.people import snapshot_people
 
 
 def run_journals(
@@ -34,6 +35,7 @@ def run_journals(
     slack_client: SlackCaptureClient | None = None,
     slack_account: str = "default",
     include_archived: bool = False,
+    people_root: RecallPaths | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield stage results; never capture remotely unless given an explicit Slack client."""
     days = date_range(first, last)
@@ -50,6 +52,10 @@ def run_journals(
     workspace = workspace.expanduser().resolve()
     if paths.root.is_relative_to(workspace) or workspace.is_relative_to(paths.root):
         raise ValueError("Run workspace must be separate from and not overlap the source root")
+    if people_root is not None:
+        if people_root.root.is_relative_to(workspace) or workspace.is_relative_to(people_root.root):
+            raise ValueError("Run workspace must not overlap the people root")
+        snapshot_people(people_root, [], author)
     protected = [
         part.resolve()
         for part in (
@@ -77,6 +83,7 @@ def run_journals(
                 "capture_slack": slack_client is not None,
                 "slack_account": slack_account if slack_client is not None else None,
                 "include_archived": include_archived if slack_client is not None else None,
+                **({"people_root": str(people_root.root)} if people_root is not None else {}),
             },
             sort_keys=True,
         )
@@ -163,6 +170,7 @@ def run_journals(
                 timezone_name=timezone_name,
                 model=model,
                 include_roots=includes,
+                people_root=people_root,
                 node_executable=node_executable,
                 pi_sdk=pi_sdk,
                 max_input_bytes=max_input_bytes,
