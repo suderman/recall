@@ -118,10 +118,9 @@ recall journal build --root /path/to/replay \
   --author "Your name" --output /path/to/preview
 ```
 
-`--select default` on `journal input-view` or `journal build` chooses a bounded day without
-hand-picking events: it drops credential-like text, bulk and automated mail, then
-the largest emails,
-and lists every omission with its reason.
+`--select default` on `journal input-view` or `journal build` chooses a bounded
+day without hand-picking events. It drops credential-like text, bulk and
+automated mail, then the largest emails, and lists every omission with its reason.
 
 The runner saves immutable cited revisions, resumes unchanged days and refuses
 to overwrite edited entries. Review claims and omissions before using
