@@ -611,7 +611,8 @@ Node and the Pi SDK are runtime prerequisites. Recall does not install them or
 guess launcher layouts. Missing or invalid configuration fails before generation,
 workspace initialization or optional capture. There is no CLI-runner mode.
 
-The default model route is `codex-lb/gpt-6.1-sol:medium`; override it with `--model`.
+The default model route is `codex-lb/gpt-6.1-sol:medium`; override it with `--model`
+or `RECALL_JOURNAL_MODEL`.
 Tools, extensions, skills, project context and session persistence are disabled.
 Only journal instructions, evidence and explicitly selected people context enter
 the model request. Approve remote transmission first. Every generation checks its
