@@ -18,6 +18,8 @@ const digest = (data) => crypto.createHash("sha256").update(data).digest("hex");
 const emit = (event) => process.stdout.write(JSON.stringify(event) + "\n");
 let session;
 let unsubscribe;
+// Fixed stage names only; error text never leaves this process.
+let stage = "request";
 try {
   let input = "";
   for await (const chunk of process.stdin) input += chunk;
@@ -31,10 +33,12 @@ try {
   if (!isDeepStrictEqual(request.policy.controls, controls)) {
     throw new Error("Unsupported policy");
   }
+  stage = "identity";
   if (digest(await fs.readFile(request.policy.sdk_module)) !== request.policy.sdk_sha256 ||
       digest(await fs.readFile(new URL(import.meta.url))) !== request.policy.adapter_sha256) {
     throw new Error("Runner identity changed");
   }
+  stage = "sdk";
   const sdk = await import(pathToFileURL(request.policy.sdk_module).href);
   // Original SDK storage remains authoritative, including normal OAuth refresh.
   const original = sdk.SettingsManager.create(process.cwd(), undefined, {projectTrusted: false});
@@ -50,6 +54,7 @@ try {
   if (settings.getRetrySettings().enabled !== false || settings.getRetrySettings().maxRetries !== 0 ||
       settings.getProviderRetrySettings().maxRetries !== 0 || settings.getCompactionEnabled() !== false ||
       settings.getCacheWarmingMode() !== "off") throw new Error("Policy was not applied");
+  stage = "model";
   const runtime = await sdk.ModelRuntime.create({allowModelNetwork: false});
   const model = runtime.getPhysicalModel(request.provider, request.model_id);
   if (!model) throw new Error("A configured physical chat model is required");
@@ -82,6 +87,7 @@ try {
     getAppendSystemPromptSources: () => [],
     extendResources: () => {}, reload: async () => {},
   };
+  stage = "session";
   ({session} = await sdk.createAgentSession({cwd: process.cwd(), modelRuntime: runtime, model,
     thinkingLevel: request.thinking, settingsManager: settings,
     sessionManager: sdk.SessionManager.inMemory(process.cwd()), resourceLoader, tools: [], noTools: "all"}));
@@ -96,12 +102,15 @@ try {
     } else if (event.type === "agent_settled") emit({type: "agent_settled"});
   });
   emit({type: "runner_policy", policy: request.policy});
+  stage = "prompt";
   await session.prompt(request.prompt, {expandPromptTemplates: false});
   if (violation || calls !== 1) throw new Error("Single-request policy violated");
   emit({type: "runner_complete", stream_calls: calls});
-} catch {
+} catch (error) {
   // Provider errors can contain credentials or source text; do not echo them.
-  process.stderr.write("Pi SDK single-request runner failed.\n");
+  const missingKey = /^No API key found for /.test(String(error?.message ?? ""));
+  const hint = missingKey ? ": no API key for the selected provider" : "";
+  process.stderr.write(`Pi SDK single-request runner failed during ${stage}${hint}.\n`);
   process.exitCode = 1;
 } finally {
   try {

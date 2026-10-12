@@ -181,8 +181,15 @@ def run_pi(
             check=False,
         )
     if result.returncode:
+        # Only the adapter's own fixed lines; provider text never reaches stderr.
+        reason = "; ".join(
+            line.removeprefix("Pi SDK ").rstrip(".")
+            for line in result.stderr.splitlines()
+            if line.startswith("Pi SDK ")
+        )
         raise ValueError(
-            f"Pi SDK runner exited with status {result.returncode}; no journal published"
+            f"Pi SDK runner exited with status {result.returncode}"
+            f"{': ' + reason if reason else ''}; no journal published"
         )
     if _sdk_policy(Path(policy["node_executable"]), Path(policy["sdk_module"])) != policy:
         raise ValueError("SDK runner identity changed during generation")

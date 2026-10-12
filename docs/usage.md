@@ -608,7 +608,10 @@ export RECALL_PI_SDK=/absolute/path/to/pi-coding-agent/dist/index.js
 ```
 
 Node and the Pi SDK are runtime prerequisites. Recall does not install them or
-guess launcher layouts. Missing or invalid configuration fails before generation,
+guess launcher layouts. The runner inherits the calling environment, so provider
+keys that Pi reads from variables (for example `CODEX_LB_API_KEY` from
+`~/.pi/agent/.env`) must be exported first. Failures name the runner stage and a
+missing provider key, never provider error text. Missing or invalid configuration fails before generation,
 workspace initialization or optional capture. There is no CLI-runner mode.
 
 The default model route is `codex-lb/gpt-6.1-sol:medium`; override it with `--model`

@@ -61,6 +61,8 @@ export async function createAgentSession(options){
    const extra=['auto_retry_start','auto_compaction_start',
                 'cache_warming_start','tool_execution_start'];
    if(extra.includes(mode)) callback({type:mode});
+   if(mode==='no-key')throw Error('No API key found for synthetic. SECRET-SHAPED DETAIL');
+   if(mode==='provider-error')throw Error('provider echoed SECRET-SHAPED DETAIL');
    const user={role:'user',timestamp:1,
                content:[{type:'text',text:mode==='changed-context'?'UNAPPROVED':prompt}]};
    const context={systemPrompt:'UNAPPROVED SDK DEFAULT',tools:[],
@@ -405,3 +407,22 @@ def test_sdk_cli_selects_explicit_bridge(sdk, tmp_path):
     )
     assert result.exit_code == 0, result.output
     assert len(json.loads(observed.read_bytes())) == 1
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("no-key", "failed during prompt: no API key for the selected provider"),
+        ("provider-error", "failed during prompt"),
+        ("virtual", "failed during model"),
+    ],
+)
+def test_sdk_failures_name_the_stage_without_echoing_errors(sdk, monkeypatch, mode, expected):
+    node, module, _, _ = sdk
+    monkeypatch.setenv("FAKE_SDK_MODE", mode)
+    with pytest.raises(ValueError) as failure:
+        generate.run_pi(
+            "Synthetic", "synthetic/fixture:off", generate._sdk_policy(node, module), 131072
+        )
+    assert expected in str(failure.value)
+    assert "SECRET" not in str(failure.value)
