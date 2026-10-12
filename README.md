@@ -116,6 +116,10 @@ recall journal build --root /path/to/replay \
   --author "Your name" --output /path/to/preview
 ```
 
+`recall journal input-view --select default` chooses a bounded day without
+hand-picking events: it drops bulk and automated mail, then the largest emails,
+and lists every omission with its reason.
+
 The runner saves immutable cited revisions, resumes unchanged days and refuses
 to overwrite edited entries. Review claims and omissions before using
 `recall journal publish`. Preparation, inspection and publication need no model

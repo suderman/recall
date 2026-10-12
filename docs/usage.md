@@ -740,10 +740,27 @@ evidence and original prompt hashes bind the view to that snapshot. Citation
 markers refer only to selected event IDs. Original packet instructions are not
 modified; the view carries the current versioned journal template separately.
 
-Without `--event`, every event is selected. Repeating `--event` makes selection
-explicit and lists every omitted event ID. Unknown or duplicate IDs fail. No
-marketing classifier silently removes events, and omitted content must not be
-inferred. Review selection for factual gaps before any later generation.
+Without `--event` or `--select`, every event is selected. Repeating `--event`
+makes selection explicit and lists every omitted event ID. Unknown or duplicate
+IDs fail. Omitted content must not be inferred. Review selection for factual gaps
+before any later generation.
+
+`--select default` applies the versioned `default-v1` rule instead of listing IDs:
+
+1. Keep every non-email event.
+2. Drop email tagged `bulk`, `marketing`, `automated`, `transactional` or
+   `empty_body`, using the first matching tag as the reason.
+3. While over budget, drop the largest remaining email.
+
+The summary adds `selection.rule` and an `omitted` map of event ID to reason. Text
+is never truncated, and non-email events are never dropped; if they alone exceed
+the budget, the command fails. The rule does not detect third-party privacy or
+credentials in personal mail.
+
+```bash
+recall journal input-view --packet "$packet" --select default \
+  --output /path/to/private/view.json
+```
 
 Exports require an owner-only directory and create mode `0600` files. Public or
 symlink files are rejected. Export inside packet, evidence or people-source data

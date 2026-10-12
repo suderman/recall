@@ -33,6 +33,7 @@ from recall.synthesize.journal import (
     save_journal,
 )
 from recall.synthesize.run import run_journals
+from recall.synthesize.selection import RULE, default_selection
 
 
 def _private_view_path(path: Path, *, directory: bool = False) -> None:
@@ -45,6 +46,9 @@ def _private_view_path(path: Path, *, directory: bool = False) -> None:
 def input_view(
     packet: Path = typer.Option(..., "--packet"),
     event: list[str] | None = typer.Option(None, "--event", help="Explicit event ID; repeat."),
+    select: str | None = typer.Option(
+        None, "--select", help=f"Named selection rule instead of --event: default ({RULE})."
+    ),
     max_bytes: int = typer.Option(128 * 1024, "--max-bytes", min=1),
     output: Path | None = typer.Option(
         None, "--output", help="Private JSON export; never overwrite edits."
@@ -52,7 +56,17 @@ def input_view(
 ) -> None:
     """Preview a bounded input as counts/hashes; export only on explicit request. No model call."""
     try:
+        selection = None
+        if select is not None:
+            if event:
+                raise ValueError("Choose either --event or --select")
+            if select != "default":
+                raise ValueError("Unknown selection rule; use --select default")
+            event, omitted = default_selection(packet, max_bytes=max_bytes)
+            selection = {"rule": RULE, "omitted": omitted}
         content, summary = model_input(packet, event_ids=event, max_bytes=max_bytes)
+        if selection is not None:
+            summary["selection"] = selection
         if output is not None:
             target = output.expanduser().absolute()
             target = target.parent.resolve() / target.name
