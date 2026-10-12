@@ -126,6 +126,20 @@ to overwrite edited entries. Review claims and omissions before using
 `recall journal publish`. Preparation, inspection and publication need no model
 request. See [journals](docs/usage.md#journals).
 
+## Nightly loop
+
+[`examples/nightly.sh`](examples/nightly.sh) runs one day end to end:
+
+1. Capture new Slack messages.
+2. Replay local mail, calendar, Slack and any BlueBubbles spool through today.
+3. Rebuild search over the archive and every `replays/*` root.
+4. Draft yesterday's journal with `--select default`.
+
+It expects the layout under `$XDG_DATA_HOME/recall`: `archive/`, an optional
+`bluebubbles/` receiver root, and `replays/`. The [service and timer examples](examples/systemd/)
+need the model provider's environment, the author name and runner paths reviewed
+per host. Drafts go to `journal-preview/` until reviewed and published.
+
 ## Storage and development
 
 Each workspace keeps raw captures in `data/raw/`, daily event JSONL in

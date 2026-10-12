@@ -1,0 +1,15 @@
+[Unit]
+Description=Recall nightly capture, replay, index and journal draft
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Review before use: provider environment, author and runner paths are host-specific.
+EnvironmentFile=%h/.pi/agent/.env
+Environment=RECALL_AUTHOR=Your Name
+Environment=RECALL_NODE_EXECUTABLE=/absolute/path/to/node
+Environment=RECALL_PI_SDK=/absolute/path/to/pi-coding-agent/dist/index.js
+EnvironmentFile=-%h/.config/recall/nightly.env
+ExecStart=%h/src/suderman/recall/examples/nightly.sh
+UMask=0077
