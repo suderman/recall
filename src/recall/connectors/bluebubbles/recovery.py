@@ -12,10 +12,10 @@ from recall.connectors.bluebubbles.capture import (
     _append_bluebubbles_envelope,
     advance_bluebubbles_cursor,
     bluebubbles_writer,
-    local_date_for_timestamp,
 )
 from recall.connectors.bluebubbles.diagnostics import safe_error
 from recall.connectors.bluebubbles.messages import handle_value, message_chat, participant_values
+from recall.normalize.time import local_date_for_timestamp
 from recall.storage.jsonl import read_jsonl
 from recall.storage.paths import RecallPaths
 from recall.storage.state import get_connector_cursor

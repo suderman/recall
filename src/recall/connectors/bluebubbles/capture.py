@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from recall.normalize.time import local_date_for_timestamp
 from recall.storage.jsonl import write_jsonl
 from recall.storage.paths import RecallPaths
 from recall.storage.state import ConnectorCursor, get_connector_cursor, set_connector_cursor
@@ -28,11 +29,6 @@ def current_timestamp() -> str:
 
 def local_today() -> str:
     return datetime.now().astimezone().date().isoformat()
-
-
-def local_date_for_timestamp(timestamp: str) -> str:
-    normalized = timestamp.replace("Z", "+00:00")
-    return datetime.fromisoformat(normalized).astimezone().date().isoformat()
 
 
 def _normalize_cursor_timestamp(timestamp: str) -> str:

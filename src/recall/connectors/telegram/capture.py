@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from recall.connectors.telegram.client import TelegramCaptureClient
+from recall.normalize.time import local_date_for_timestamp
 from recall.storage.jsonl import read_jsonl, write_jsonl
 from recall.storage.paths import RecallPaths
 from recall.storage.state import ConnectorCursor, set_connector_cursor
@@ -35,11 +36,6 @@ class TelegramCaptureBatchResult:
 
 def current_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def local_date_for_timestamp(timestamp: str) -> str:
-    normalized = timestamp.replace("Z", "+00:00")
-    return datetime.fromisoformat(normalized).astimezone().date().isoformat()
 
 
 def parse_date(value: str) -> str:

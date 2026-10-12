@@ -17,11 +17,6 @@ def parse_date(value: str) -> str:
     return value
 
 
-def local_date_for_timestamp(timestamp: str) -> str:
-    normalized = timestamp.replace("Z", "+00:00")
-    return datetime.fromisoformat(normalized).astimezone().date().isoformat()
-
-
 def raw_capture_paths(paths: RecallPaths, date: str) -> tuple[Path, Path]:
     parse_date(date)
     raw_dir = paths.raw_capture_dir("asana", date)

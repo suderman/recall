@@ -221,7 +221,7 @@ def test_one_writer_and_queue_corruption_fail_closed(tmp_path):
 
 
 def test_malformed_raw_append_retains_pending_receipt(tmp_path):
-    from recall.connectors.telegram.capture import local_date_for_timestamp
+    from recall.normalize.time import local_date_for_timestamp
 
     paths = RecallPaths.from_root(tmp_path / "archive")
     original = client(tmp_path, [message(1)])

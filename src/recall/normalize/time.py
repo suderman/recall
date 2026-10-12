@@ -20,3 +20,11 @@ def event_datetime(timestamp: str) -> datetime:
 
 def event_date(timestamp: str, timezone_name: str) -> str:
     return event_datetime(timestamp).astimezone(ZoneInfo(timezone_name)).date().isoformat()
+
+
+def local_date_for_timestamp(timestamp: str) -> str:
+    """Raw capture partition in the host's local zone. Replay scans every capture day.
+
+    Naive export timestamps are read as host-local time.
+    """
+    return datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone().date().isoformat()

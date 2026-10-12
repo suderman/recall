@@ -10,8 +10,8 @@ from typing import Any
 
 from recall.connectors.bluebubbles.capture import (
     append_bluebubbles_envelope,
-    local_date_for_timestamp,
 )
+from recall.normalize.time import local_date_for_timestamp
 from recall.storage.paths import RecallPaths
 
 

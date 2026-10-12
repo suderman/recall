@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from recall.connectors.telegram.capture import append_telegram_envelope, local_date_for_timestamp
+from recall.connectors.telegram.capture import append_telegram_envelope
+from recall.normalize.time import local_date_for_timestamp
 from recall.storage.paths import RecallPaths
 
 ID_SUFFIX_PATTERN = re.compile(r"(\d+)$")
