@@ -49,6 +49,10 @@
             wrapProgram "$out/bin/recall" \
               --set-default TELEGRAM_TDLIB_LIBRARY_PATH "${pkgs.tdlib}/lib/libtdjson.so" \
               --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath [ pkgs.tdlib ]}"
+            # notmuch and khal come from the caller's PATH, matching the user's own config.
+            install -Dm755 ${./examples/nightly.sh} "$out/bin/recall-nightly"
+            wrapProgram "$out/bin/recall-nightly" \
+              --prefix PATH : "$out/bin:${pkgs.lib.makeBinPath [ pkgs.coreutils ]}"
           '';
           meta = {
             description = "Recall command-line interface";

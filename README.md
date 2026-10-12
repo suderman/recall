@@ -128,7 +128,7 @@ request. See [journals](docs/usage.md#journals).
 
 ## Nightly loop
 
-[`examples/nightly.sh`](examples/nightly.sh) runs one day end to end:
+[`examples/nightly.sh`](examples/nightly.sh), packaged as `recall-nightly`, runs one day end to end:
 
 1. Capture new Slack messages.
 2. Replay local mail, calendar, Slack and any BlueBubbles spool through today.
