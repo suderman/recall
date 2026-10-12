@@ -50,8 +50,9 @@ recall init
 ```
 
 Commands use `--root`, then `RECALL_ROOT`, then the current directory as their
-workspace. The Nix shell sets `RECALL_ROOT` to this checkout. Use explicit roots
-when working with another archive.
+workspace. The Nix shell defaults `RECALL_ROOT` to
+`$XDG_DATA_HOME/recall/archive` and runs `recall` from this checkout's source.
+Use explicit roots when working with another archive.
 
 Copy the needed [source config examples](config/sources/) to `.toml` files in
 that workspace and set their credential environment variables. Keep

@@ -25,6 +25,10 @@
           ruff
         ];
         pythonEnv = python.withPackages (_: runtimeDeps ++ devDeps);
+        # The dev shell runs checkout source; the package can lag uncommitted files.
+        devRecall = pkgs.writeShellScriptBin "recall" ''
+          exec ${pythonEnv}/bin/python -m recall.cli.main "$@"
+        '';
       in {
         packages.default = pythonPackages.buildPythonApplication {
           pname = "recall";
@@ -57,7 +61,7 @@
         devShells.default = pkgs.mkShell {
           packages = [
             pythonEnv
-            self.packages.${system}.default
+            devRecall
             pkgs.khal
             pkgs.notmuch
             pkgs.sqlite
@@ -66,8 +70,9 @@
           ];
 
           shellHook = ''
-            export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
-            export RECALL_ROOT="$PWD"
+            # Only checkout source; inherited setup-hook paths include other Python versions.
+            export PYTHONPATH="$PWD/src"
+            export RECALL_ROOT="''${RECALL_ROOT:-''${XDG_DATA_HOME:-$HOME/.local/share}/recall/archive}"
             export TELEGRAM_TDLIB_LIBRARY_PATH="${pkgs.tdlib}/lib/libtdjson.so"
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.tdlib ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           '';
