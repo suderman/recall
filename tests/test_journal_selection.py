@@ -112,3 +112,113 @@ def test_input_view_refuses_both_explicit_events_and_a_rule(tmp_path):
 
     assert result.exit_code != 0
     assert "either" in result.output
+
+
+def test_build_applies_the_default_rule_per_day_and_records_it(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from test_journals import runner_config
+
+    from recall.synthesize import generate
+
+    directory = packet(tmp_path)
+    paths = journal.RecallPaths.from_root(tmp_path / "inputs")
+    calls = []
+
+    def run(prompt, model, policy, budget):
+        calls.append(prompt)
+        return "I replied.[fn:evt_reply]", {"tools_enabled": False, "responseId": "fixture"}
+
+    monkeypatch.setattr(generate, "run_pi", run)
+
+    def build(**options):
+        return generate.build_journals(
+            paths,
+            first=DAY,
+            last=DAY,
+            author="Example",
+            timezone_name=TZ,
+            output=tmp_path / "journal",
+            select="default",
+            **runner_config(tmp_path),
+            **options,
+        )[0]
+
+    result = build()
+
+    assert result["status"] == "generated" and len(calls) == 1
+    assert "Short note." in calls[0] and "evt_news" not in calls[0].split("omitted_event_ids")[0]
+    record, _ = generate._read_revision(Path(result["revision"]))
+    metadata = record["generation_options"]["model_input"]
+    assert metadata["selection"] == {
+        "rule": RULE,
+        "omitted": {
+            "evt_blank": "email:empty_body",
+            "evt_news": "email:bulk",
+            "evt_receipt": "email:automated",
+        },
+    }
+    assert metadata["request_bytes"] <= metadata["max_request_bytes"]
+    assert build()["status"] == "cached" and len(calls) == 1
+    assert directory.exists()
+
+
+def test_build_fits_the_assembled_request_not_just_the_view(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from test_journals import runner_config
+
+    from recall.synthesize import generate
+
+    packet(tmp_path)
+    paths = journal.RecallPaths.from_root(tmp_path / "inputs")
+    monkeypatch.setattr(
+        generate,
+        "run_pi",
+        lambda *_: ("I replied.[fn:evt_reply]", {"tools_enabled": False}),
+    )
+    view, _ = journal.model_input(
+        journal.prepare_journal(paths, day=DAY, author="Example", timezone_name=TZ),
+        event_ids=["evt_break", "evt_thread", "evt_reply", "evt_mail"],
+        max_bytes=10**7,
+    )
+    # A budget the bare view fits but the full request (wrapper plus system) does not.
+    budget = len(view.encode()) + 10
+
+    result = generate.build_journals(
+        paths,
+        first=DAY,
+        last=DAY,
+        author="Example",
+        timezone_name=TZ,
+        output=tmp_path / "journal",
+        select="default",
+        max_input_bytes=budget,
+        **runner_config(tmp_path),
+    )[0]
+
+    record, _ = generate._read_revision(Path(result["revision"]))
+    assert record["generation_options"]["model_input"]["selection"]["omitted"]["evt_thread"] == (
+        "over_budget"
+    )
+
+
+def test_build_refuses_both_a_view_and_a_rule(tmp_path):
+    from test_journals import runner_config
+
+    from recall.synthesize import generate
+
+    packet(tmp_path)
+    paths = journal.RecallPaths.from_root(tmp_path / "inputs")
+    with pytest.raises(ValueError, match="either"):
+        generate.build_journals(
+            paths,
+            first=DAY,
+            last=DAY,
+            author="Example",
+            timezone_name=TZ,
+            output=tmp_path / "journal",
+            select="default",
+            input_view=tmp_path / "view.json",
+            **runner_config(tmp_path),
+        )

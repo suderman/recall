@@ -116,7 +116,7 @@ recall journal build --root /path/to/replay \
   --author "Your name" --output /path/to/preview
 ```
 
-`recall journal input-view --select default` chooses a bounded day without
+`--select default` on `journal input-view` or `journal build` chooses a bounded day without
 hand-picking events: it drops bulk and automated mail, then the largest emails,
 and lists every omission with its reason.
 

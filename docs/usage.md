@@ -763,6 +763,11 @@ recall journal input-view --packet "$packet" --select default \
   --output /path/to/private/view.json
 ```
 
+`journal build --select default` applies the same rule to every day in its range,
+sized against the full request (journal wrapper plus system prompt). The rule and
+each omission reason are saved in the revision's `model_input` metadata, and a
+changed rule or omission set invalidates the cached day.
+
 Exports require an owner-only directory and create mode `0600` files. Public or
 symlink files are rejected. Export inside packet, evidence or people-source data
 directories is refused. A writer lock and atomic replacement protect the output. Exact retries

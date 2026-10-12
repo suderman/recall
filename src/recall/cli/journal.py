@@ -194,6 +194,9 @@ def build(
     input_view: Path | None = typer.Option(
         None, "--input-view", help="Opt in to one explicit exported view; one day only."
     ),
+    select: str | None = typer.Option(
+        None, "--select", help=f"Apply a named selection rule to each day: default ({RULE})."
+    ),
     max_input_bytes: int = typer.Option(
         128 * 1024,
         "--max-input-bytes",
@@ -224,6 +227,7 @@ def build(
             include_roots=[RecallPaths.from_root(path) for path in include_root or []],
             people_root=RecallPaths.from_root(people_root) if people_root is not None else None,
             input_view=input_view,
+            select=select,
             max_input_bytes=max_input_bytes,
             node_executable=node_executable,
             pi_sdk=pi_sdk,

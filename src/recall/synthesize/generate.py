@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+from functools import partial
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -27,6 +28,7 @@ from recall.synthesize.journal import (
     prepare_journal,
     save_journal,
 )
+from recall.synthesize.selection import RULE, default_selection
 
 DEFAULT_MODEL = "codex-lb/gpt-6.1-sol:medium"
 SYSTEM_PROMPT = (
@@ -215,6 +217,10 @@ def _check_target(target: Path, owned: dict[str, Any], jobs: dict[str, Any]) -> 
     }
     if target.exists() and _sha(target.read_text()) not in known:
         raise ValueError(f"Refusing to overwrite handwritten/edited journal: {target}")
+
+
+def _request_bytes(packet_dir: Path, input_view: str | None) -> int:
+    return len(_prompt(packet_dir, input_view).encode()) + len(SYSTEM_PROMPT.encode())
 
 
 def _prompt(packet_dir: Path, input_view: str | None = None) -> str:
@@ -423,12 +429,17 @@ def build_journals(
     include_roots: list[RecallPaths] | None = None,
     people_root: RecallPaths | None = None,
     input_view: Path | None = None,
+    select: str | None = None,
     max_input_bytes: int = 128 * 1024,
     node_executable: Path,
     pi_sdk: Path,
 ) -> list[dict[str, Any]]:
     """Resume completed days; regenerate explicitly or when evidence/options change."""
     days = date_range(first, last)
+    if select is not None and input_view is not None:
+        raise ValueError("Choose either an input view or a selection rule")
+    if select not in {None, "default"}:
+        raise ValueError("Unknown selection rule; use default")
     policy = _sdk_policy(node_executable, pi_sdk)
     if input_view is not None and len(days) != 1:
         raise ValueError("One selected input view requires exactly one day")
@@ -475,8 +486,15 @@ def build_journals(
                 inspection = inspect_packet(packet_dir)
                 if inspection["input_status"] != "unchanged" or inspection["unresolved_citations"]:
                     raise ValueError("Selected input evidence is not verified current")
+            elif select is not None:
+                selected, omitted = default_selection(
+                    packet_dir, max_bytes=budget, measure=partial(_request_bytes, packet_dir)
+                )
+                view_content, _ = model_input(packet_dir, event_ids=selected, max_bytes=sys.maxsize)
+                selected_metadata = _validate_model_input(packet_dir, view_content)
+                selected_metadata["selection"] = {"rule": RULE, "omitted": omitted}
             prompt = _prompt(packet_dir, view_content)
-            request_bytes = len(prompt.encode()) + len(SYSTEM_PROMPT.encode())
+            request_bytes = _request_bytes(packet_dir, view_content)
             if request_bytes > budget:
                 raise ValueError(f"Assembled input uses {request_bytes} bytes; budget is {budget}")
             if selected_metadata is not None:

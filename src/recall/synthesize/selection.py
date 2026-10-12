@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from recall.synthesize.journal import _load_packet, model_input
@@ -13,11 +14,17 @@ RULE = "default-v1"
 DROPPED_EMAIL_TAGS = ("bulk", "marketing", "automated", "transactional", "empty_body")
 
 
-def default_selection(directory: Path, *, max_bytes: int) -> tuple[list[str], dict[str, str]]:
+def default_selection(
+    directory: Path,
+    *,
+    max_bytes: int,
+    measure: Callable[[str], int] | None = None,
+) -> tuple[list[str], dict[str, str]]:
     """Keep non-email evidence and personal mail; drop the largest mail first to fit.
 
     Never drops non-email events and never truncates text. Raises when even the
-    smallest selection exceeds the budget.
+    smallest selection exceeds the budget. ``measure`` sizes the request actually
+    sent; by default that is the encoded view.
     """
     _, events = _load_packet(directory)
     omitted: dict[str, str] = {}
@@ -35,12 +42,12 @@ def default_selection(directory: Path, *, max_bytes: int) -> tuple[list[str], di
     )
     while True:
         selected = [row["event_id"] for row in kept if row["event_id"] not in omitted]
-        _, summary = model_input(directory, event_ids=selected, max_bytes=sys.maxsize)
-        if summary["bytes"] <= max_bytes:
+        content, summary = model_input(directory, event_ids=selected, max_bytes=sys.maxsize)
+        size = summary["bytes"] if measure is None else measure(content)
+        if size <= max_bytes:
             return selected, dict(sorted(omitted.items()))
         if not removable:
             raise ValueError(
-                f"{RULE} selection uses {summary['bytes']} bytes without email; "
-                f"budget is {max_bytes}"
+                f"{RULE} selection uses {size} bytes without email; budget is {max_bytes}"
             )
         omitted[removable.pop()["event_id"]] = "over_budget"
