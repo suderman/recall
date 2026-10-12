@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import re
 from pathlib import Path
@@ -13,6 +12,7 @@ from zoneinfo import ZoneInfo
 from recall.normalize.rebuild import SOURCES, date_range, file_hash
 from recall.normalize.time import event_datetime
 from recall.storage.jsonl import read_jsonl, write_jsonl, write_text_atomic
+from recall.storage.locks import lock_nonblocking
 from recall.storage.paths import RecallPaths
 from recall.storage.references import raw_reference, resolve_reference
 
@@ -172,8 +172,8 @@ def build_timelines(
         (paths.state / "timeline-writer.lock").open("a") as lock,
         (paths.state / "rebuild/writer.lock").open("a") as rebuild_lock,
     ):
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        fcntl.flock(rebuild_lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        lock_nonblocking(lock)
+        lock_nonblocking(rebuild_lock, shared=True)
         manifest = paths.state / "timelines.jsonl"
         previous = read_jsonl(manifest) if manifest.exists() else []
         known = {row["path"]: row for row in previous}

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -15,6 +14,7 @@ from typing import Any
 
 from recall.normalize.rebuild import date_range
 from recall.storage.jsonl import read_jsonl, write_jsonl, write_text_atomic
+from recall.storage.locks import lock_nonblocking
 from recall.storage.paths import RecallPaths
 from recall.storage.references import resolve_reference
 from recall.synthesize.journal import (
@@ -356,7 +356,7 @@ def publish_journal(
         raise ValueError("Publication output must be outside Recall data directories")
     paths.state.mkdir(parents=True, exist_ok=True)
     with (paths.state / "journal-build.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_nonblocking(lock)
         manifest = paths.state / "journal-builds.jsonl"
         publications = paths.state / "journal-publications.jsonl"
         jobs = {row["path"]: row for row in read_jsonl(manifest)} if manifest.exists() else {}
@@ -454,7 +454,7 @@ def build_journals(
     publications = paths.state / "journal-publications.jsonl"
     results: list[dict[str, Any]] = []
     with (paths.state / "journal-build.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_nonblocking(lock)
         jobs = {row["path"]: row for row in read_jsonl(manifest)} if manifest.exists() else {}
         owned = (
             {row["path"]: row for row in read_jsonl(publications)} if publications.exists() else {}

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -19,6 +18,7 @@ from zoneinfo import ZoneInfo
 from recall.normalize.rebuild import SOURCES
 from recall.normalize.time import day_bounds, event_date, event_datetime
 from recall.storage.jsonl import read_jsonl, write_text_atomic
+from recall.storage.locks import lock_nonblocking
 from recall.storage.paths import RecallPaths
 from recall.storage.references import normalized_citation, raw_reference, resolve_reference
 from recall.synthesize.people import select_people, snapshot_people
@@ -118,16 +118,16 @@ def prepare_journal(
     (paths.state / "rebuild").mkdir(exist_ok=True)
     with ExitStack() as stack:
         lock = stack.enter_context((paths.state / "journal-writer.lock").open("a"))
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_nonblocking(lock)
         primary_lock = paths.state / "rebuild/writer.lock"
         rebuild_lock = stack.enter_context(primary_lock.open("a"))
-        fcntl.flock(rebuild_lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        lock_nonblocking(rebuild_lock, shared=True)
         # Included roots are read-only. Lock existing replay writers without creating files.
         for root in sorted(roots[1:], key=lambda root: str(root.root)):
             writer = root.state / "rebuild/writer.lock"
             if writer.exists():
                 handle = stack.enter_context(writer.open("rb"))
-                fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                lock_nonblocking(handle, shared=True)
         snapshots: dict[Path, str | None] = {}
         inputs = []
         indexed: dict[str, dict[str, Any]] = {}
@@ -752,7 +752,7 @@ def save_journal(
     revision = paths.derived / "journals" / day[:4] / day / _sha(record)
     paths.state.mkdir(parents=True, exist_ok=True)
     with (paths.state / "journal-writer.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_nonblocking(lock)
         for name, content in (
             ("journal.org", rendered),
             ("body.org", body),

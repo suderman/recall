@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import sqlite3
@@ -35,6 +34,7 @@ from recall.storage.jsonl import (
     write_jsonl,
     write_normalized_events,
 )
+from recall.storage.locks import lock_nonblocking
 from recall.storage.paths import RecallPaths
 
 RAW_SOURCES = {
@@ -201,7 +201,7 @@ def rebuild_range(
     state = output.state / "rebuild"
     state.mkdir(exist_ok=True)
     with (state / "writer.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_nonblocking(lock)
         return _rebuild(inputs, output, days, sources, timezone_name, account, state, voice_policy)
 
 
