@@ -42,18 +42,22 @@ def _kind_bucket(
     source: str, kind: str, value: str, alias_source: str | None = None
 ) -> tuple[str, str] | None:
     del source
+    if alias_source is not None:
+        # Aliases are observed labels, often chat-wide. Only a source that names this
+        # identity's own address makes one a match key; the identity kind does not.
+        if alias_source.endswith("_email"):
+            return ("email", _norm_email(value))
+        if alias_source.endswith("_username"):
+            return ("handle", _norm_handle(value))
+        if alias_source.endswith("_phone_number"):
+            return ("phone", _norm_phone(value))
+        return None
     if kind in {"email"}:
         return ("email", _norm_email(value))
     if kind in {"phone", "phone_number"}:
         return ("phone", _norm_phone(value))
     if kind in {"username", "handle"}:
         return ("handle", _norm_handle(value))
-    if alias_source and alias_source.endswith("_email"):
-        return ("email", _norm_email(value))
-    if alias_source and alias_source.endswith("_username"):
-        return ("handle", _norm_handle(value))
-    if alias_source and alias_source.endswith("_phone_number"):
-        return ("phone", _norm_phone(value))
     return None
 
 

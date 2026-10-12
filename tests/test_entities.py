@@ -586,3 +586,57 @@ def test_enrich_events_with_people_uses_event_timestamp_against_resolution_windo
     assert events[0].participant_person_ids == ["person_old_owner"]
     assert events[1].sender_person_id == "person_new_owner"
     assert events[1].participant_person_ids == ["person_new_owner"]
+
+
+def test_chat_label_aliases_never_act_as_another_persons_address(tmp_path) -> None:
+    from recall.entities.storage import upsert_identity_aliases
+
+    paths = RecallPaths.from_root(tmp_path)
+    upsert_persons(paths, [{"person_id": "person_ness", "display_name": "Ness", "created_at": "x"}])
+    upsert_identities(
+        paths,
+        [
+            {
+                "identity_id": "ident_email_ness",
+                "person_id": "person_ness",
+                "source": "email",
+                "kind": "email",
+                "value": "ness@example.com",
+                "created_at": "x",
+            },
+            {
+                "identity_id": "ident_bb_ness",
+                "source": "bluebubbles",
+                "kind": "email",
+                "value": "ness@example.com",
+                "created_at": "x",
+            },
+            {
+                "identity_id": "ident_bb_connie",
+                "source": "bluebubbles",
+                "kind": "email",
+                "value": "connie@example.com",
+                "created_at": "x",
+            },
+        ],
+    )
+    # A group-chat label that happens to show another member's address.
+    upsert_identity_aliases(
+        paths,
+        [
+            {
+                "identity_alias_id": "alias_chat",
+                "identity_id": "ident_bb_connie",
+                "value": "ness@example.com",
+                "source": "bluebubbles_display_name",
+                "created_at": "x",
+            }
+        ],
+    )
+
+    match_entities(paths)
+
+    with sqlite3.connect(paths.database) as connection:
+        bound = dict(connection.execute("select identity_id, person_id from identities"))
+    assert bound["ident_bb_ness"] == "person_ness"
+    assert bound["ident_bb_connie"] is None
