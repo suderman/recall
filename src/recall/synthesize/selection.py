@@ -3,15 +3,24 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
 
 from recall.synthesize.journal import _load_packet, model_input
 
-RULE = "default-v1"
+RULE = "default-v2"
 # Checked in order; the first matching tag names the omission reason.
 DROPPED_EMAIL_TAGS = ("bulk", "marketing", "automated", "transactional", "empty_body")
+# Text that looks like a credential never leaves the machine, whatever its source.
+# Patterns favour recall over precision; a dropped event stays in the packet.
+CREDENTIAL_LIKE = re.compile(
+    r"(?i)\b(?:password|passwd|pwd|passcode|api[ _-]?key|secret[ _-]?key|access[ _-]?token"
+    r"|client[ _-]?secret)\b\s*[:=]\s*\S{4,}"
+    r"|\bxox[abprs]-[A-Za-z0-9-]{10,}|\bgh[pousr]_[A-Za-z0-9]{20,}|\bsk-[A-Za-z0-9_-]{20,}"
+    r"|\bAKIA[0-9A-Z]{16}\b|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+)
 
 
 def default_selection(
@@ -22,9 +31,10 @@ def default_selection(
 ) -> tuple[list[str], dict[str, str]]:
     """Keep non-email evidence and personal mail; drop the largest mail first to fit.
 
-    Never drops non-email events and never truncates text. Raises when even the
-    smallest selection exceeds the budget. ``measure`` sizes the request actually
-    sent; by default that is the encoded view.
+    Drops credential-like text from any source. Otherwise never drops non-email
+    events, and never truncates text. Raises when even the smallest selection
+    exceeds the budget. ``measure`` sizes the request actually sent; by default
+    that is the encoded view.
     """
     _, events = _load_packet(directory)
     omitted: dict[str, str] = {}
@@ -32,7 +42,9 @@ def default_selection(
     for row in events:
         tags = set(row.get("tags") or [])
         reason = next((tag for tag in DROPPED_EMAIL_TAGS if tag in tags), None)
-        if row["source"] == "email" and reason is not None:
+        if CREDENTIAL_LIKE.search(row.get("text") or ""):
+            omitted[row["event_id"]] = "credential_like"
+        elif row["source"] == "email" and reason is not None:
             omitted[row["event_id"]] = f"email:{reason}"
         else:
             kept.append(row)

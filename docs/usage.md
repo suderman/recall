@@ -749,17 +749,20 @@ makes selection explicit and lists every omitted event ID. Unknown or duplicate
 IDs fail. Omitted content must not be inferred. Review selection for factual gaps
 before any later generation.
 
-`--select default` applies the versioned `default-v1` rule instead of listing IDs:
+`--select default` applies the versioned `default-v2` rule instead of listing IDs:
 
-1. Keep every non-email event.
-2. Drop email tagged `bulk`, `marketing`, `automated`, `transactional` or
+1. Drop any event whose text looks like a credential (`password: …`, API keys,
+   Slack, GitHub, AWS or `sk-` tokens, private keys), with reason `credential_like`.
+2. Keep every other non-email event.
+3. Drop email tagged `bulk`, `marketing`, `automated`, `transactional` or
    `empty_body`, using the first matching tag as the reason.
-3. While over budget, drop the largest remaining email.
+4. While over budget, drop the largest remaining email.
 
 The summary adds `selection.rule` and an `omitted` map of event ID to reason. Text
-is never truncated, and non-email events are never dropped; if they alone exceed
-the budget, the command fails. The rule does not detect third-party privacy or
-credentials in personal mail.
+is never truncated. Apart from credential-like text, non-email events are never
+dropped; if they alone exceed the budget, the command fails. The credential check
+is a pattern screen, not a guarantee, and the rule does not judge third-party
+privacy in personal mail.
 
 ```bash
 recall journal input-view --packet "$packet" --select default \

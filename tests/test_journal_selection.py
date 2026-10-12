@@ -32,6 +32,13 @@ def packet(tmp_path):
         _email("evt_blank", 11, ["conversation_candidate", "empty_body"], text=""),
         _email("evt_thread", 12, ["conversation_candidate"], text="Long history. " * 400),
         _email("evt_reply", 13, ["conversation_candidate"]),
+        _email(
+            "evt_secret",
+            14,
+            ["conversation_candidate"],
+            text="Staging login below.\n> Password = 2cH8x0Q9vLm4TzR7wPe1KsY3",
+        ),
+        _email("evt_reset", 15, ["conversation_candidate"], text="I reset my password today."),
     ]
     write_jsonl(paths.normalized_event_path(DAY), rows)
     return journal.prepare_journal(paths, day=DAY, author="Example", timezone_name=TZ)
@@ -42,11 +49,12 @@ def test_default_rule_drops_bulk_and_automated_mail_and_keeps_the_rest(tmp_path)
 
     selected, omitted = default_selection(directory, max_bytes=1024 * 1024)
 
-    assert selected == ["evt_break", "evt_thread", "evt_reply", "evt_mail"]
+    assert selected == ["evt_break", "evt_thread", "evt_reply", "evt_reset", "evt_mail"]
     assert omitted == {
         "evt_blank": "email:empty_body",
         "evt_news": "email:bulk",
         "evt_receipt": "email:automated",
+        "evt_secret": "credential_like",
     }
 
 
@@ -60,7 +68,7 @@ def test_default_rule_drops_largest_email_first_to_fit_the_budget(tmp_path):
 
     selected, omitted = default_selection(directory, max_bytes=full["bytes"] - 1)
 
-    assert selected == ["evt_break", "evt_reply", "evt_mail"]
+    assert selected == ["evt_break", "evt_reply", "evt_reset", "evt_mail"]
     assert omitted["evt_thread"] == "over_budget"
     assert journal.model_input(directory, event_ids=selected, max_bytes=full["bytes"] - 1)
 
@@ -87,9 +95,10 @@ def test_input_view_cli_reports_rule_and_reasons_without_prose(tmp_path):
             "evt_blank": "email:empty_body",
             "evt_news": "email:bulk",
             "evt_receipt": "email:automated",
+            "evt_secret": "credential_like",
         },
     }
-    assert summary["events"] == 4
+    assert summary["events"] == 5
     assert "Long history" not in result.output
 
 
@@ -156,6 +165,7 @@ def test_build_applies_the_default_rule_per_day_and_records_it(tmp_path, monkeyp
             "evt_blank": "email:empty_body",
             "evt_news": "email:bulk",
             "evt_receipt": "email:automated",
+            "evt_secret": "credential_like",
         },
     }
     assert metadata["request_bytes"] <= metadata["max_request_bytes"]
@@ -179,7 +189,7 @@ def test_build_fits_the_assembled_request_not_just_the_view(tmp_path, monkeypatc
     )
     view, _ = journal.model_input(
         journal.prepare_journal(paths, day=DAY, author="Example", timezone_name=TZ),
-        event_ids=["evt_break", "evt_thread", "evt_reply", "evt_mail"],
+        event_ids=["evt_break", "evt_thread", "evt_reply", "evt_reset", "evt_mail"],
         max_bytes=10**7,
     )
     # A budget the bare view fits but the full request (wrapper plus system) does not.
@@ -222,3 +232,16 @@ def test_build_refuses_both_a_view_and_a_rule(tmp_path):
             input_view=tmp_path / "view.json",
             **runner_config(tmp_path),
         )
+
+
+def test_credential_like_text_is_dropped_from_any_source(tmp_path):
+    paths = workspace(tmp_path / "inputs")
+    rows = read_jsonl(paths.normalized_event_path(DAY))
+    rows[1].update(text="Door code: api_key=sk-live-0123456789abcdefghijKLMN")
+    write_jsonl(paths.normalized_event_path(DAY), rows)
+    directory = journal.prepare_journal(paths, day=DAY, author="Example", timezone_name=TZ)
+
+    selected, omitted = default_selection(directory, max_bytes=1024 * 1024)
+
+    assert omitted == {rows[1]["event_id"]: "credential_like"}
+    assert selected == [rows[0]["event_id"]]
