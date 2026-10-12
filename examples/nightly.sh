@@ -19,9 +19,11 @@ output=${RECALL_JOURNAL_OUTPUT:-$home/journal-preview}
 day=${1:-$(TZ=$tz date -d yesterday +%F)}
 today=$(TZ=$tz date +%F)
 
-# Remote capture first; replay reads only saved evidence.
+# Remote capture first; replay reads only saved evidence. A failed capture
+# leaves a visible coverage gap in the journal rather than skipping the night.
 if [[ -f $archive/config/sources/slack.toml ]]; then
-  recall capture slack --root "$archive" --incremental
+  recall capture slack --root "$archive" --incremental ||
+    echo "recall-nightly: Slack capture failed; continuing with saved evidence" >&2
 fi
 
 # Replay through today so late arrivals for the journal day are included.
