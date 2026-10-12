@@ -7,8 +7,9 @@ model calls. A lookup result is evidence for an answer, not the answer itself.
 
 Resolve =scripts/lookup.sh= relative to this skill directory. Run it with Bash
 from any working directory. It resolves the containing Recall checkout even
-through the installed skill symlink and uses that checkout's local index. It
-ignores =RECALL_ROOT= by passing an explicit root. Nix runs offline against the
+through the installed skill symlink. It searches the main archive at
+=~/.local/share/recall/archive= when present, otherwise the checkout's own index.
+It ignores =RECALL_ROOT= by passing an explicit root. Nix runs offline against the
 checkout's existing flake; it may write normal Nix caches, not archive evidence.
 
 If the index or environment is unavailable, report the actual command error.

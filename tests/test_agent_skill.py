@@ -27,6 +27,7 @@ def wrapper(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     nix.chmod(0o755)
     environment = {**os.environ, "PATH": f"{commands}:{os.environ['PATH']}"}
     environment["RECALL_ROOT"] = str(tmp_path / "wrong archive")
+    environment["HOME"] = str(tmp_path / "home")
     return installed / "scripts" / "lookup.sh", root, environment
 
 
@@ -104,3 +105,21 @@ def test_skill_bundle_has_discovery_metadata_and_readable_org_workflow() -> None
         "they are not in Recall",
     ]:
         assert boundary in workflow
+
+
+def test_skill_wrapper_prefers_the_main_archive_outside_the_checkout(
+    wrapper: tuple[Path, Path, dict[str, str]], tmp_path: Path
+) -> None:
+    script, root, environment = wrapper
+    archive = tmp_path / "home" / ".local" / "share" / "recall" / "archive"
+    (archive / "data").mkdir(parents=True)
+    result = subprocess.run(
+        ["bash", str(script), "query", "school"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    arguments = json.loads(result.stdout)
+    assert arguments[:3] == ["develop", "--offline", str(root)]
+    assert arguments[-2:] == ["--root", str(archive)]
