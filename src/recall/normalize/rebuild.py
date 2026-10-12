@@ -28,6 +28,7 @@ from recall.entities.observations import retain_labels
 from recall.normalize.artifacts import NormalizedArtifact, RemoteLocator
 from recall.normalize.events import NormalizedEvent, RawReference
 from recall.normalize.time import day_bounds, event_date
+from recall.storage.db import migrate_database
 from recall.storage.jsonl import (
     read_jsonl,
     write_artifact_metadata,
@@ -227,6 +228,9 @@ def _rebuild(
         staging.ensure_directories()
         _snapshot_database(inputs.database, staging.database)
         entity_hash = file_hash(staging.database) if staging.database.exists() else None
+        if staging.database.exists():
+            # Only the private copy is migrated; the hash still names the input state.
+            migrate_database(staging)
         config_hashes = {
             str(path): file_hash(path)
             for path in sorted(inputs.entity_resolution_config.glob("*.toml"))

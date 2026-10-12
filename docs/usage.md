@@ -558,6 +558,14 @@ recall entities show resolutions --root /path/to/archive
 recall entities match --root /path/to/archive
 ```
 
+Schema changes to an existing database are explicit. Commands refuse a database
+that lacks newer columns instead of altering it. `recall migrate` writes an
+owner-only backup under `data/state/backups/`, then adds the missing columns:
+
+```bash
+recall migrate --root /path/to/archive
+```
+
 Reused addresses need event-time validity bounds. A name or handle alone does
 not prove ownership. Changed resolutions require refreshed normalized enrichment
 and an index rebuild before derived views reflect them.

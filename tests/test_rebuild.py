@@ -164,3 +164,22 @@ def test_fixture_sources_together(tmp_path):
     assert not [job for job in jobs if job["status"] == "failed"]
     rows = read_jsonl(output.normalized_event_path("2026-03-31"))
     assert {row["source"] for row in rows} == set(replay.RAW_SOURCES)
+
+
+def test_replay_migrates_only_its_copy_of_a_legacy_identity_database(tmp_path):
+    import sqlite3
+
+    inputs, output = _workspaces(tmp_path)
+    _telegram(inputs)
+    with sqlite3.connect(inputs.database) as connection:
+        connection.execute(
+            "create table resolutions (resolution_id text primary key, identity_id text not "
+            "null, person_id text not null, confidence text not null, method text not null, "
+            "evidence_json text not null default '[]', created_at text not null)"
+        )
+    before = inputs.database.read_bytes()
+
+    jobs = _run(inputs, output)
+
+    assert jobs[0]["status"] == "success"
+    assert inputs.database.read_bytes() == before

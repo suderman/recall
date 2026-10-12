@@ -129,6 +129,9 @@ derived views in `data/derived/`, and SQLite identities/cursors in
 `data/state/recall.sqlite3`. Local Maildir and calendars remain authoritative.
 Back up raw evidence, acquired bytes, state and accepted replay workspaces
 alongside journals. Git ignores private data and config; that is not a backup.
+Keep the real archive outside the checkout, where `git clean` cannot reach it.
+On kit it belongs in `~/.local/share/recall/archive`. Schema changes to an
+existing database need `recall migrate`, which backs it up first.
 
 Source lives in `src/recall/`; fixtures and regressions live in `tests/`.
 Check this checkout explicitly rather than assuming the packaged CLI matches:

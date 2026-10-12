@@ -152,7 +152,8 @@ def snapshot_people(
                         context["people"][person_id] = person
                 context["events"][event["event_id"]] = bindings
     except SQLAlchemyError as exc:
-        raise ValueError("Cannot read journal identity database") from exc
+        hint = "; run `recall migrate` first" if "no such column" in str(exc) else ""
+        raise ValueError(f"Cannot read journal identity database{hint}") from exc
     finally:
         engine.dispose()
     if (config.read_bytes() if config.exists() else None) != before:

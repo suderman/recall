@@ -80,7 +80,7 @@ from recall.connectors.telegram.cli import (
     show_telegram_state,
     sync_telegram_entities,
 )
-from recall.storage.db import initialize_database
+from recall.storage.db import initialize_database, migrate_database
 from recall.storage.paths import RecallPaths
 
 app = typer.Typer(help="Recall command-line interface.", no_args_is_help=True)
@@ -150,6 +150,30 @@ def init(
     typer.echo(f"Initialized Recall workspace at {paths.root}")
     typer.echo(f"SQLite state database: {paths.database}")
     typer.echo(f"Normalized event store: {paths.normalized}")
+
+
+@app.command()
+def migrate(
+    root: Path | None = typer.Option(
+        None,
+        "--root",
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace whose SQLite database to migrate.",
+    ),
+) -> None:
+    """Back up the SQLite database, then apply pending schema changes."""
+
+    try:
+        report = migrate_database(_load_paths(root))
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--root") from exc
+    if not report["added"]:
+        typer.echo(f"{report['database']} is already current")
+        return
+    typer.echo(f"Backed up {report['database']} to {report['backup']}")
+    typer.echo(f"Added {', '.join(report['added'])}")
 
 
 @app.command()

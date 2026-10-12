@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy import Connection, Engine
@@ -88,26 +92,80 @@ connector_cursors = sa.Table(
 )
 
 
+# Columns added after the first schema. Existing databases gain them only through migrate.
+MIGRATED_COLUMNS = (("resolutions", "valid_from"), ("resolutions", "valid_to"))
+
+
+class SchemaMigrationRequired(RuntimeError):
+    pass
+
+
 def sqlite_url(database_path: Path) -> str:
     return f"sqlite:///{database_path}"
 
 
 def create_engine(paths: RecallPaths) -> Engine:
-    paths.ensure_directories()
+    paths.state.mkdir(parents=True, exist_ok=True)
     return sa.create_engine(sqlite_url(paths.database), future=True)
 
 
-def ensure_schema(engine: Engine) -> None:
-    metadata.create_all(engine)
+def _missing_columns(engine: Engine) -> list[str]:
     inspector = sa.inspect(engine)
-    if "resolutions" not in inspector.get_table_names():
-        return
-    resolution_columns = {column["name"] for column in inspector.get_columns("resolutions")}
-    with engine.begin() as connection:
-        if "valid_from" not in resolution_columns:
-            connection.execute(sa.text("ALTER TABLE resolutions ADD COLUMN valid_from TEXT"))
-        if "valid_to" not in resolution_columns:
-            connection.execute(sa.text("ALTER TABLE resolutions ADD COLUMN valid_to TEXT"))
+    tables = set(inspector.get_table_names())
+    columns = {
+        table: {column["name"] for column in inspector.get_columns(table)}
+        for table in {table for table, _ in MIGRATED_COLUMNS} & tables
+    }
+    return [
+        f"{table}.{column}"
+        for table, column in MIGRATED_COLUMNS
+        if table in columns and column not in columns[table]
+    ]
+
+
+def ensure_schema(engine: Engine) -> None:
+    """Create absent tables. Never alter existing ones; that is an explicit migration."""
+    missing = _missing_columns(engine)
+    if missing:
+        raise SchemaMigrationRequired(
+            f"{engine.url.database} lacks {', '.join(missing)}; "
+            "back it up with `recall migrate --root ROOT` first"
+        )
+    metadata.create_all(engine)
+
+
+def migrate_database(paths: RecallPaths) -> dict[str, Any]:
+    """Back up an existing database, then add any missing migrated columns."""
+    if not paths.database.is_file():
+        raise ValueError(f"No Recall database at {paths.database}")
+    engine = create_engine(paths)
+    try:
+        missing = _missing_columns(engine)
+        report: dict[str, Any] = {
+            "database": paths.relative_to_root(paths.database),
+            "added": missing,
+            "backup": None,
+        }
+        if not missing:
+            return report
+        backups = paths.state / "backups"
+        backups.mkdir(mode=0o700, exist_ok=True)
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        backup = backups / f"{paths.database.name}.{stamp}"
+        if backup.exists():
+            raise ValueError(f"Migration backup already exists: {backup}")
+        descriptor = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.close(descriptor)
+        with sqlite3.connect(paths.database) as source, sqlite3.connect(backup) as destination:
+            source.backup(destination)
+        with engine.begin() as connection:
+            for name in missing:
+                table, column = name.split(".")
+                connection.execute(sa.text(f"ALTER TABLE {table} ADD COLUMN {column} TEXT"))
+        report["backup"] = paths.relative_to_root(backup)
+        return report
+    finally:
+        engine.dispose()
 
 
 def connect(paths: RecallPaths) -> Connection:
