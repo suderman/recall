@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -77,6 +79,15 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
+@contextmanager
+def _workspace_writer(paths: RecallPaths) -> Iterator[None]:
+    """Serialize daily read-modify-write so concurrent writers cannot lose updates."""
+    paths.state.mkdir(parents=True, exist_ok=True)
+    with (paths.state / "normalized.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
 def _event_sort_key(record: Mapping[str, Any]) -> tuple[datetime, str, str]:
     timestamp = datetime.fromisoformat(str(record["timestamp"]).replace("Z", "+00:00"))
     if timestamp.tzinfo is None:
@@ -110,7 +121,8 @@ def write_normalized_events(
     """Upsert incrementally, or replace one explicitly selected source/account.
 
     Callers must establish complete, successful input before scoped replacement.
-    Read-modify-write requires a single writer, even though replacement is atomic.
+    Each day's read-modify-write holds the workspace writer lock; a multi-day range
+    is still not one transaction.
     """
     destination = normalized_events_path(paths.normalized, date)
     event_records = [event.to_record() for event in events]
@@ -119,13 +131,16 @@ def write_normalized_events(
     if replace_scope is not None:
         if any((row["source"], row.get("account")) != replace_scope for row in event_records):
             raise ValueError("incoming event outside replacement scope")
-    existing = []
-    if (merge_existing or replace_scope is not None) and destination.exists():
-        existing = read_jsonl(destination)
-    if replace_scope is not None:
-        existing = [row for row in existing if (row["source"], row.get("account")) != replace_scope]
-    records = _merge_normalized_event_records(existing, event_records)
-    write_jsonl(destination, records, append=append)
+    with _workspace_writer(paths):
+        existing = []
+        if (merge_existing or replace_scope is not None) and destination.exists():
+            existing = read_jsonl(destination)
+        if replace_scope is not None:
+            existing = [
+                row for row in existing if (row["source"], row.get("account")) != replace_scope
+            ]
+        records = _merge_normalized_event_records(existing, event_records)
+        write_jsonl(destination, records, append=append)
     return destination
 
 
@@ -138,6 +153,13 @@ def write_artifact_metadata(
     append: bool = False,
 ) -> Path:
     destination = paths.artifact_metadata_path(source, date)
+    with _workspace_writer(paths):
+        return _write_artifact_metadata(destination, artifacts, append=append)
+
+
+def _write_artifact_metadata(
+    destination: Path, artifacts: Iterable[NormalizedArtifact], *, append: bool
+) -> Path:
     existing = read_jsonl(destination) if destination.exists() and not append else []
     by_id = {row["artifact_id"]: row for row in existing}
     for artifact in artifacts:

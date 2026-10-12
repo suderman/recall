@@ -89,3 +89,36 @@ def test_write_normalized_events_merge_replaces_same_event_id(tmp_path) -> None:
     records = read_jsonl(destination)
     assert len(records) == 1
     assert records[0]["text"] == "new text"
+
+
+def test_normalized_writes_wait_for_the_workspace_writer_lock(tmp_path) -> None:
+    import fcntl
+    import threading
+
+    paths = RecallPaths.from_root(tmp_path)
+    event = NormalizedEvent(
+        event_id="evt_email_1",
+        source="email",
+        timestamp="2026-03-31T17:31:07Z",
+        date="2026-03-31",
+        kind="message",
+    )
+    paths.state.mkdir(parents=True)
+    finished = threading.Event()
+
+    def write() -> None:
+        write_normalized_events(paths, event.date, [event], merge_existing=True)
+        finished.set()
+
+    with (paths.state / "normalized.lock").open("a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        writer = threading.Thread(target=write)
+        writer.start()
+        # A concurrent read-modify-write must not proceed while another writer holds the lock.
+        assert not finished.wait(0.3)
+    writer.join(5)
+
+    assert finished.is_set()
+    assert [row["event_id"] for row in read_jsonl(paths.normalized_event_path(event.date))] == [
+        "evt_email_1"
+    ]
