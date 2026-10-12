@@ -61,8 +61,9 @@ def capture_slack(
 ) -> None:
     """Capture Slack raw data for a day or incrementally from cursor state."""
 
-    load_dotenv()
     paths = _paths_for(root)
+    # Secrets belong to the workspace, not to wherever the package is installed.
+    load_dotenv(paths.root / ".env")
     paths.ensure_directories()
     config = load_slack_config(paths)
     token = os.getenv(config.token_env_var)

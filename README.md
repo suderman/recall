@@ -55,7 +55,8 @@ workspace. The Nix shell defaults `RECALL_ROOT` to
 Use explicit roots when working with another archive.
 
 Copy the needed [source config examples](config/sources/) to `.toml` files in
-that workspace and set their credential environment variables. Keep
+that workspace and set their credential environment variables, either exported
+or in the workspace's own owner-only `.env`. Keep
 `artifact_download_policy = "metadata-only"` unless byte acquisition is intended.
 For BlueBubbles, replace the example token and LAN settings before serving.
 See [source setup](docs/usage.md#source-setup).

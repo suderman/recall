@@ -668,3 +668,26 @@ def test_day_bounded_capture_does_not_require_or_update_cursor_state(tmp_path) -
         cursor_key=SLACK_CURSOR_KEY,
     )
     assert cursor is None
+
+
+def test_slack_capture_reads_the_workspace_env_file(tmp_path, monkeypatch) -> None:
+    from typer.testing import CliRunner
+
+    from recall.cli.main import app
+
+    # Track the variable so monkeypatch removes whatever load_dotenv sets.
+    monkeypatch.setenv("RECALL_TEST_SLACK_TOKEN", "unset")
+    monkeypatch.delenv("RECALL_TEST_SLACK_TOKEN")
+    sources = tmp_path / "config" / "sources"
+    sources.mkdir(parents=True)
+    (sources / "slack.toml").write_text('token_env_var = "RECALL_TEST_SLACK_TOKEN"\n')
+    (tmp_path / ".env").write_text("RECALL_TEST_SLACK_TOKEN=xoxp-fixture\n")
+
+    result = CliRunner().invoke(
+        app,
+        ["capture", "slack", "--root", str(tmp_path), "--date", "2026-10-12", "--incremental"],
+    )
+
+    # The token check passes, so the command reaches its own argument validation.
+    assert "Missing Slack token" not in result.output
+    assert "Use either --date or --incremental" in result.output

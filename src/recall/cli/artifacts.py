@@ -271,8 +271,8 @@ def download_slack_artifact_bytes(
 ) -> None:
     """Download source-native Slack artifact bytes for one day."""
 
-    load_dotenv()
     paths = _paths_for(root)
+    load_dotenv(paths.root / ".env")
     paths.ensure_directories()
     config = load_slack_config(paths)
     token = os.getenv(config.token_env_var)
@@ -357,8 +357,8 @@ def download_bluebubbles_artifact_bytes(
 ) -> None:
     """Download source-native BlueBubbles attachment bytes for one day."""
 
-    load_dotenv()
     paths = _paths_for(root)
+    load_dotenv(paths.root / ".env")
     paths.ensure_directories()
     config = load_bluebubbles_config(paths)
     password = os.getenv(config.password_env_var)
@@ -481,7 +481,7 @@ def download_telegram_artifact_bytes(
     tdlib_client = None
     tdlib_error: str | None = None
     if not dry_run and telegram_artifacts_need_tdlib(paths, date=date, force=force):
-        load_dotenv()
+        load_dotenv(paths.root / ".env")
         try:
             settings = build_tdlib_auth_settings(paths, config)
             transport = TdlibJsonTransport(
