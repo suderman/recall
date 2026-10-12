@@ -27,6 +27,10 @@
         pythonEnv = python.withPackages (_: runtimeDeps ++ devDeps);
         # The dev shell runs checkout source; the package can lag uncommitted files.
         devRecall = pkgs.writeShellScriptBin "recall" ''
+          if [ ! -d "''${PYTHONPATH%%:*}/recall" ]; then
+            echo "recall: start the dev shell from the Recall checkout" >&2
+            exit 1
+          fi
           exec ${pythonEnv}/bin/python -m recall.cli.main "$@"
         '';
       in {

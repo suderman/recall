@@ -18,4 +18,6 @@ checkout=$(realpath -- "$(dirname -- "$script")/../../..")
 # The main archive lives outside the checkout; older setups kept it inside.
 archive="$HOME/.local/share/recall/archive"
 [ -d "$archive/data" ] || archive=$checkout
+# The dev shell runs checkout source relative to the working directory.
+cd -- "$checkout"
 exec nix develop --offline "$checkout" -c recall search "$@" --root "$archive"
