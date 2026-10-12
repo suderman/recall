@@ -647,6 +647,26 @@ Repeat the same command to resume. Previews live under `WORKSPACE/preview`, with
 packets/revisions in `WORKSPACE/replay`. Nothing publishes to the main archive,
 index or journal, and no recurring job is installed.
 
+### Course-correct with author notes
+
+After reading a draft, write what it missed or got wrong in a per-day Org file,
+one paragraph per point:
+
+```text
+~/org/journal/notes/2026/10/2026-10-08.org
+```
+
+Configure the directory in the archive's `config/sources/notes.toml` (see the
+[example](../config/sources/notes.toml.example)). Replay with `--source notes`
+reads the file like mail or calendar; each blank-line separated paragraph becomes
+a cited `author_note` event. Org keywords and heading-only lines are ignored.
+Journals treat notes as reliable first-hand evidence and cite them. Removing a
+paragraph removes its event on the next replay.
+
+`recall-nightly` redrafts any of the previous seven days whose notes file is
+newer than its draft, alongside yesterday. To redraft a corrected day at once,
+run `recall-nightly YYYY-MM-DD` with that day.
+
 ### Prepare or inspect without a model
 
 ```bash
