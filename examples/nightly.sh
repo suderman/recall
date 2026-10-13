@@ -15,7 +15,8 @@ home=${RECALL_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/recall}
 archive=$home/archive
 tz=${RECALL_TIMEZONE:-America/Edmonton}
 author=${RECALL_AUTHOR:?Set RECALL_AUTHOR to the journal author name}
-output=${RECALL_JOURNAL_OUTPUT:-$home/journal-preview}
+# The real journal. Entries are written once; edited entries are never overwritten.
+output=${RECALL_JOURNAL_OUTPUT:-$HOME/org/journal}
 day=${1:-$(TZ=$tz date -d yesterday +%F)}
 today=$(TZ=$tz date +%F)
 

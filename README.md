@@ -139,7 +139,8 @@ request. See [journals](docs/usage.md#journals).
 It expects the layout under `$XDG_DATA_HOME/recall`: `archive/`, an optional
 `bluebubbles/` receiver root, and `replays/`. The [service and timer examples](examples/systemd/)
 need the model provider's environment, the author name and runner paths reviewed
-per host. Drafts go to `journal-preview/` until reviewed and published.
+per host. Entries go straight to `~/org/journal` (`RECALL_JOURNAL_OUTPUT`). Edit
+any entry when you like; Recall refuses to overwrite an edited entry.
 
 ## Storage and development
 
