@@ -23,9 +23,10 @@ Recall also has cross-source identity resolution, source-native attachment
 metadata and optional byte downloads, isolated replay, SQLite full-text search,
 and cited Org journal generation through Pi.
 
-There is no web UI or installed nightly journal job. Worklogs, broader remote
-backfill and fuzzy cross-source deduplication are not implemented. Capture and
-real-world media coverage still need validation. A passing hash or citation
+There is no web UI. The nightly loop is available as `recall-nightly`; scheduling
+needs host configuration. Worklogs, broader remote backfill and fuzzy cross-source
+deduplication are not implemented. Capture and real-world media coverage still
+need validation. A passing hash or citation
 check does not prove complete history or a journal's factual claims.
 
 ## Get started
@@ -140,7 +141,9 @@ It expects the layout under `$XDG_DATA_HOME/recall`: `archive/`, an optional
 `bluebubbles/` receiver root, and `replays/`. The [service and timer examples](examples/systemd/)
 need the model provider's environment, the author name and runner paths reviewed
 per host. Entries go straight to `~/org/journal` (`RECALL_JOURNAL_OUTPUT`). Edit
-any entry when you like; Recall refuses to overwrite an edited entry.
+any entry when you like; Recall refuses to overwrite an edited entry. If Slack
+capture fails, the loop still builds from saved evidence, then exits with failure
+so systemd can send an alert.
 
 ## Storage and development
 
@@ -164,9 +167,10 @@ ruff check src tests
 ruff format --check src tests
 ```
 
-`nix build --no-link` builds the standalone CLI package. Deployment examples in
-[examples/systemd/](examples/systemd/) need host-specific paths, persistence
-and credentials checked before use.
+`nix build --no-link` builds the standalone CLI package. Use `git+file:///path/to/recall`
+for local flake overrides. A `path:` input copies ignored files, including `.env`,
+into the world-readable Nix store. Deployment examples in [examples/systemd/](examples/systemd/)
+need host-specific paths, persistence and credentials checked before use.
 
 Detailed commands and safety limits live in the [usage guide](docs/usage.md).
 Project contracts, working rules, TODOs and validation progress live outside
