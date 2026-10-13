@@ -19,7 +19,6 @@ from recall.connectors.bluebubbles.normalize import normalize_bluebubbles_day
 from recall.connectors.calendar.normalize import normalize_calendar_day
 from recall.connectors.email.entities import sync_email_entities
 from recall.connectors.email.normalize import normalize_email_day
-from recall.connectors.notes import normalize_notes_day, notes_directory
 from recall.connectors.slack.entities import sync_slack_entities
 from recall.connectors.slack.normalize import normalize_slack_day
 from recall.connectors.telegram.entities import sync_telegram_entities
@@ -44,7 +43,7 @@ RAW_SOURCES = {
     "telegram": (normalize_telegram_day, sync_telegram_entities, "updates.jsonl"),
     "asana": (normalize_asana_day, sync_asana_entities, "events.jsonl"),
 }
-SOURCES = (*RAW_SOURCES, "email", "calendar", "notes")
+SOURCES = (*RAW_SOURCES, "email", "calendar")
 
 
 def date_range(first: str, last: str) -> list[str]:
@@ -344,14 +343,6 @@ def _rebuild(
                                 date=day,
                                 account=account or "default",
                                 timezone_name=timezone_name,
-                            )
-                        elif source == "notes":
-                            normalize_notes_day(
-                                staging,
-                                date=day,
-                                account=account or "default",
-                                timezone_name=timezone_name,
-                                directory=notes_directory(inputs),
                             )
                         else:
                             normalize_calendar_day(
